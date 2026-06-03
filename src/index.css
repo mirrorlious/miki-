@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .brand-logo {
+    @apply flex h-8 w-12 items-center justify-center rounded-lg bg-[#416fae] text-white shadow-sm;
+    font-family: 'Segoe Print', 'Comic Sans MS', 'Bradley Hand ITC', cursive;
+    letter-spacing: 0;
+  }
+
+  .brand-word {
+    display: block;
+    color: #2f5f9f;
+    font-family: 'Segoe Print', 'Comic Sans MS', 'Bradley Hand ITC', cursive;
+    font-size: 17px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .brand-letter {
+    display: inline-block;
+    transform-origin: 50% 75%;
+  }
+
+  .brand-logo .brand-letter {
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1;
+    text-shadow: 0 1px 0 rgb(255 255 255 / 18%);
+  }
+
+  .brand-letter-m {
+    transform: rotate(-7deg) translateY(1px);
+  }
+
+  .brand-letter-i {
+    transform: rotate(5deg) translateY(-1px);
+  }
+
+  .brand-letter-k {
+    transform: rotate(-3deg) translateY(1px);
+  }
+
+  .brand-letter-bang {
+    transform: rotate(9deg) translateY(-1px);
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-800 antialiased selection:bg-blue-200;
+    font-family: 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
+  }
+}
+
+/* 优雅的细滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-200 rounded-full hover:bg-gray-300 transition-colors;
+}
