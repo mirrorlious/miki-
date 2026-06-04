@@ -26,6 +26,12 @@ function mapAuthError(error) {
       return '尝试次数太多，稍后再试。'
     case 'auth/network-request-failed':
       return '网络连接失败，稍后再试。'
+    case 'auth/configuration-not-found':
+      return 'Firebase Authentication 还没启用，请在 Firebase 控制台打开 Authentication 并启用登录方式。'
+    case 'auth/operation-not-allowed':
+      return '这个登录方式还没启用，请在 Firebase Authentication 的 Sign-in method 里打开。'
+    case 'auth/unauthorized-domain':
+      return '当前域名还没有加入 Firebase 授权域名，请在 Authentication 设置里添加。'
     case 'permission-denied':
       return '云端权限被拒绝，请检查 Firestore 规则。'
     default:
