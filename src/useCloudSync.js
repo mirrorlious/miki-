@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { auth, db, googleProvider, hasFirebaseConfig } from './lib/firebase'
+import { auth, db, githubProvider, googleProvider, hasFirebaseConfig } from './lib/firebase'
 
 function getAccountLabel(user) {
   if (!user) return '当前账号'
@@ -190,6 +190,11 @@ export function useCloudSync(data, setData) {
     await signInWithPopup(auth, googleProvider)
   }, '正在打开 Google 登录...')
 
+  const signInWithGithub = () => runAuthAction(async () => {
+    const { signInWithPopup } = await import('firebase/auth')
+    await signInWithPopup(auth, githubProvider)
+  }, '正在打开 GitHub 登录...')
+
   const signInWithEmail = ({ email, password }) => {
     const validationError = validateEmailPassword(email, password)
     if (validationError) {
@@ -246,6 +251,7 @@ export function useCloudSync(data, setData) {
     authError,
     onClearAuthError: () => setAuthError(''),
     onSignInWithGoogle: signInWithGoogle,
+    onSignInWithGithub: signInWithGithub,
     onSignInWithEmail: signInWithEmail,
     onSignUpWithEmail: signUpWithEmail,
     onResetPassword: resetPassword,

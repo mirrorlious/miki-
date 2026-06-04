@@ -12,9 +12,10 @@ const hasFirebaseConfig = Object.values(firebaseConfig).every(Boolean)
 let auth = null
 let db = null
 let googleProvider = null
+let githubProvider = null
 
 if (hasFirebaseConfig) {
-  const [{ initializeApp }, { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence }, { getFirestore }] = await Promise.all([
+  const [{ initializeApp }, { getAuth, GoogleAuthProvider, GithubAuthProvider, browserLocalPersistence, setPersistence }, { getFirestore }] = await Promise.all([
     import('firebase/app'),
     import('firebase/auth'),
     import('firebase/firestore'),
@@ -26,6 +27,7 @@ if (hasFirebaseConfig) {
   db = getFirestore(app)
   googleProvider = new GoogleAuthProvider()
   googleProvider.setCustomParameters({ prompt: 'select_account' })
+  githubProvider = new GithubAuthProvider()
 }
 
-export { auth, db, googleProvider, hasFirebaseConfig }
+export { auth, db, googleProvider, githubProvider, hasFirebaseConfig }

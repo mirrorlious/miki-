@@ -20,6 +20,7 @@ import {
   ListOrdered,
   LogIn,
   LogOut,
+  GitBranch,
   Maximize2,
   MessageSquare,
   MoreVertical,
@@ -698,9 +699,15 @@ function AuthDialog({ open, cloud, onClose }) {
               or
               <span className="h-px flex-1 bg-gray-100" />
             </div>
-            <button type="button" onClick={cloud.onSignInWithGoogle} disabled={cloud.authBusy} className="flex h-11 w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-black text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300">
-              使用 Google 登录
-            </button>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button type="button" onClick={cloud.onSignInWithGoogle} disabled={cloud.authBusy} className="flex h-11 w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-black text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300">
+                使用 Google 登录
+              </button>
+              <button type="button" onClick={cloud.onSignInWithGithub} disabled={cloud.authBusy} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-sm font-black text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300">
+                <GitBranch size={15} />
+                使用 GitHub 登录
+              </button>
+            </div>
           </>
         )}
 
