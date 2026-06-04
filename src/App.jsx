@@ -13,8 +13,10 @@ import {
   CloudOff,
   Flag,
   FolderOpen,
+  Gift,
   Image,
   Italic,
+  LayoutDashboard,
   Layers3,
   List,
   ListOrdered,
@@ -33,6 +35,7 @@ import {
   Trash2,
   Underline,
   Upload,
+  User,
   Video,
   Volume2,
   Wand2,
@@ -221,6 +224,30 @@ const ACHIEVEMENTS = [
     color: '#af52de',
     isEarned: (data) => getTopChapterTimeRows(data, 1).some((row) => row.seconds >= CHAPTER_MILESTONE_SECONDS),
     progress: (data) => `${Math.min(Math.floor((getTopChapterTimeRows(data, 1)[0]?.seconds ?? 0) / 60), 10)}/10 分钟`,
+  },
+]
+
+const REWARD_OPTIONS = [
+  {
+    id: 'focus-pass',
+    title: '专注通行证',
+    description: '给今天的学习页解锁一枚专注徽章。',
+    cost: 20,
+    badge: 'Focus',
+  },
+  {
+    id: 'profile-frame',
+    title: '头像边框',
+    description: '在个人页标记一枚已兑换头像边框。',
+    cost: 40,
+    badge: 'Frame',
+  },
+  {
+    id: 'vip-week',
+    title: '会员体验券',
+    description: '预留给后续高级功能的 7 天体验资格。',
+    cost: 80,
+    badge: 'VIP',
   },
 ]
 
@@ -581,6 +608,47 @@ function getAchievementState(data) {
   }
 }
 
+function getStoredProfile(data) {
+  const profile = data?.profile && typeof data.profile === 'object' ? data.profile : {}
+  return {
+    name: profile.name ?? '',
+    nickname: profile.nickname ?? profile.name ?? '',
+    avatarUrl: profile.avatarUrl ?? '',
+    bio: profile.bio ?? '',
+    examDate: profile.examDate ?? '',
+    dailyGoalMinutes: Number(profile.dailyGoalMinutes) || 45,
+    redeemedRewards: Array.isArray(profile.redeemedRewards) ? profile.redeemedRewards : [],
+  }
+}
+
+function getProfile(data, cloud) {
+  const stored = getStoredProfile(data)
+  const fallbackName = cloud?.user?.displayName || cloud?.accountLabel || '学习者'
+  const nickname = stored.nickname.trim() || stored.name.trim() || fallbackName
+  return {
+    ...stored,
+    nickname,
+    initials: nickname.slice(0, 2).toUpperCase(),
+  }
+}
+
+function getRewardState(data) {
+  const achievementState = getAchievementState(data)
+  const profile = getStoredProfile(data)
+  const redeemedRewards = profile.redeemedRewards
+  const spentPoints = redeemedRewards.reduce((sum, item) => {
+    const reward = REWARD_OPTIONS.find((option) => option.id === item.rewardId)
+    return sum + (reward?.cost ?? 0)
+  }, 0)
+
+  return {
+    ...achievementState,
+    spentPoints,
+    availablePoints: Math.max(0, achievementState.totalPoints - spentPoints),
+    redeemedRewards,
+  }
+}
+
 function formatSyncTime(timestamp) {
   if (!timestamp) return '尚未同步'
   return new Date(timestamp).toLocaleString('zh-CN', {
@@ -607,6 +675,56 @@ function ToolbarButton({ to, icon: Icon, label, disabled = false }) {
     >
       <Icon size={16} />
       {label}
+    </NavLink>
+  )
+}
+
+function ProfileAvatar({ profile, size = 'md' }) {
+  const dimensionClass = size === 'lg' ? 'h-20 w-20 text-2xl' : size === 'sm' ? 'h-9 w-9 text-xs' : 'h-11 w-11 text-sm'
+  const imageSizeClass = size === 'lg' ? 'h-20 w-20' : size === 'sm' ? 'h-9 w-9' : 'h-11 w-11'
+
+  if (profile.avatarUrl) {
+    return (
+      <img
+        src={profile.avatarUrl}
+        alt={profile.nickname}
+        className={`${imageSizeClass} rounded-2xl border border-white object-cover shadow-sm`}
+      />
+    )
+  }
+
+  return (
+    <div className={`${dimensionClass} grid shrink-0 place-items-center rounded-2xl bg-gray-950 font-black text-white shadow-sm`}>
+      {profile.initials}
+    </div>
+  )
+}
+
+function SidebarNavItem({ to, icon: Icon, label, description, disabled = false }) {
+  const baseClass = 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors'
+
+  if (disabled) {
+    return (
+      <span className={`${baseClass} cursor-not-allowed text-gray-300`}>
+        <Icon size={17} />
+        <span>
+          <span className="block text-sm font-black">{label}</span>
+          <span className="block text-[11px] font-bold">{description}</span>
+        </span>
+      </span>
+    )
+  }
+
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) => `${baseClass} ${isActive ? 'bg-gray-950 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'}`}
+    >
+      <Icon size={17} />
+      <span>
+        <span className="block text-sm font-black">{label}</span>
+        <span className="block text-[11px] font-bold opacity-60">{description}</span>
+      </span>
     </NavLink>
   )
 }
@@ -880,18 +998,31 @@ function Shell({ children, data, cloud, studyDeckId }) {
   const summary = stats(data)
   const firstDeckId = studyDeckId ?? data.decks[0]?.id
   const syncLabel = cloud.enabled ? (cloud.user ? '已同步' : '待登录') : '本地模式'
+  const profile = getProfile(data, cloud)
+  const rewardState = getRewardState(data)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
+
+  const navItems = [
+    { to: '/decks', icon: LayoutDashboard, label: '仪表盘', description: '今日任务与卡组' },
+    { to: '/browse', icon: AlignLeft, label: '卡片库', description: '搜索和批注', disabled: !firstDeckId },
+    { to: '/organize', icon: FolderOpen, label: '整理', description: '章节与线索', disabled: !firstDeckId },
+    { to: '/app', icon: Target, label: '统计', description: '复习负载' },
+    { to: '/profile', icon: User, label: '个人', description: '头像与奖励' },
+  ]
 
   function openAuthDialog() {
     cloud.onClearAuthError?.()
     setAuthDialogOpen(true)
   }
 
+  const actionButtonClass = 'inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-black shadow-sm transition-colors'
+  const disabledActionClass = `${actionButtonClass} cursor-not-allowed bg-gray-100 text-gray-300`
+
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-gray-950 font-sans">
       <AuthDialog open={authDialogOpen} cloud={cloud} onClose={() => setAuthDialogOpen(false)} />
-      <header className="sticky top-0 z-40 border-b border-white/70 bg-[#f5f5f7]/85 backdrop-blur-xl">
-        <div className="mx-auto max-w-6xl px-5 py-3 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-40 border-b border-white/70 bg-[#f5f5f7]/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
           <Link to="/decks" className="flex items-center gap-3 text-sm font-black text-gray-950">
             <span className="brand-logo" aria-label="mik!">
               <span className="brand-letter brand-letter-m">m</span>
@@ -910,42 +1041,99 @@ function Shell({ children, data, cloud, studyDeckId }) {
             </span>
           </Link>
 
-          <nav className="h-11 rounded-xl bg-gray-200/70 p-1 flex items-center gap-1">
-            <ToolbarButton to="/decks" icon={Layers3} label="卡组" />
-            <ToolbarButton to={firstDeckId ? `/cards/new/${firstDeckId}` : '/decks'} icon={Plus} label="添加" disabled={!firstDeckId} />
-            <ToolbarButton to="/import" icon={Upload} label="导入" disabled={!firstDeckId} />
-            <ToolbarButton to="/browse" icon={AlignLeft} label="浏览" disabled={!firstDeckId} />
-            <ToolbarButton to="/organize" icon={FolderOpen} label="整理" disabled={!firstDeckId} />
-            <ToolbarButton to={firstDeckId ? `/study/${firstDeckId}` : '/decks'} icon={Brain} label="学习" disabled={!firstDeckId} />
-            <ToolbarButton to="/app" icon={Target} label="统计" />
-          </nav>
+          <div className="hidden items-center gap-2 md:flex">
+            {firstDeckId ? (
+              <>
+                <Link to={`/cards/new/${firstDeckId}`} className={`${actionButtonClass} bg-white text-gray-700 hover:bg-gray-50`}>
+                  <Plus size={14} /> 添加
+                </Link>
+                <Link to="/import" className={`${actionButtonClass} bg-white text-gray-700 hover:bg-gray-50`}>
+                  <Upload size={14} /> 导入
+                </Link>
+                <Link to={`/study/${firstDeckId}`} className={`${actionButtonClass} bg-[#007aff] text-white hover:bg-[#006ee6]`}>
+                  <Brain size={14} /> 学习
+                </Link>
+              </>
+            ) : (
+              <>
+                <span className={disabledActionClass}><Plus size={14} /> 添加</span>
+                <span className={disabledActionClass}><Upload size={14} /> 导入</span>
+                <span className={disabledActionClass}><Brain size={14} /> 学习</span>
+              </>
+            )}
+          </div>
 
           <div className="flex items-center gap-3 text-xs text-gray-500">
             <span className="hidden sm:inline-flex rounded-full bg-white/75 px-3 py-1.5 font-bold text-gray-700 shadow-sm">待复习 {summary.dueToday}</span>
-            <span className="hidden md:flex items-center gap-1.5" title={cloud.message}>
+            <span className="hidden lg:flex items-center gap-1.5" title={cloud.message}>
               {cloud.enabled ? <Cloud size={14} className="text-[#34c759]" /> : <CloudOff size={14} />}
               {syncLabel}
             </span>
+            <Link to="/profile" className="hidden max-w-[190px] items-center gap-2 rounded-2xl bg-white/75 px-2 py-1.5 shadow-sm hover:bg-white sm:flex">
+              <ProfileAvatar profile={profile} size="sm" />
+              <span className="min-w-0">
+                <span className="block truncate font-black text-gray-800">{profile.nickname}</span>
+                <span className="block text-[10px] font-bold text-gray-400">{rewardState.availablePoints} 可用点</span>
+              </span>
+            </Link>
             {cloud.enabled && !cloud.user && (
               <button type="button" onClick={openAuthDialog} className="h-8 px-3 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50 flex items-center gap-1.5">
                 <LogIn size={13} /> 登录
               </button>
             )}
             {cloud.enabled && cloud.user && (
-              <>
-                <span className="hidden lg:inline-flex max-w-[180px] truncate rounded-full bg-white/75 px-3 py-1.5 font-bold text-gray-700 shadow-sm" title={cloud.accountLabel}>{cloud.accountLabel}</span>
-                <button type="button" onClick={cloud.onSignOut} className="h-8 px-3 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50 flex items-center gap-1.5">
-                  <LogOut size={13} /> 退出
-                </button>
-              </>
+              <button type="button" onClick={cloud.onSignOut} className="h-8 px-3 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50 flex items-center gap-1.5">
+                <LogOut size={13} /> 退出
+              </button>
             )}
           </div>
         </div>
+
+        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-5 pb-3 lg:hidden">
+          {navItems.map((item) => (
+            <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
+          ))}
+        </nav>
       </header>
 
-      <main className="max-w-6xl mx-auto px-5 py-6">
-        {children}
-      </main>
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-5 py-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="hidden lg:block">
+          <div className="sticky top-[88px] space-y-4">
+            <nav className="rounded-2xl bg-white/90 p-2 shadow-sm ring-1 ring-white">
+              {navItems.map((item) => (
+                <SidebarNavItem key={item.to} {...item} />
+              ))}
+            </nav>
+
+            <section className="rounded-2xl bg-white/90 p-4 shadow-sm ring-1 ring-white">
+              <div className="flex items-center gap-3">
+                <ProfileAvatar profile={profile} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-gray-950">{profile.nickname}</p>
+                  <p className="text-[11px] font-bold text-gray-400">{syncLabel}</p>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-center">
+                <div className="rounded-xl bg-gray-50 px-3 py-2">
+                  <p className="text-lg font-black text-gray-950">{rewardState.totalPoints}</p>
+                  <p className="text-[10px] font-bold text-gray-400">成就点</p>
+                </div>
+                <div className="rounded-xl bg-gray-50 px-3 py-2">
+                  <p className="text-lg font-black text-gray-950">{rewardState.availablePoints}</p>
+                  <p className="text-[10px] font-bold text-gray-400">可兑换</p>
+                </div>
+              </div>
+              <Link to="/profile" className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-gray-950 text-xs font-black text-white hover:bg-gray-800">
+                <Gift size={14} /> 奖励中心
+              </Link>
+            </section>
+          </div>
+        </aside>
+
+        <main className="min-w-0">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }
@@ -1052,6 +1240,191 @@ function Dashboard({ data, onOpenCreateDeck, studyDeckId, cloud }) {
 
 function Home() {
   return <Navigate to="/decks" replace />
+}
+
+function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) {
+  const profile = getProfile(data, cloud)
+  const rewardState = getRewardState(data)
+  const summary = stats(data)
+  const [form, setForm] = useState({
+    nickname: profile.nickname,
+    avatarUrl: profile.avatarUrl,
+    bio: profile.bio,
+    examDate: profile.examDate,
+    dailyGoalMinutes: profile.dailyGoalMinutes,
+  })
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    setForm({
+      nickname: profile.nickname,
+      avatarUrl: profile.avatarUrl,
+      bio: profile.bio,
+      examDate: profile.examDate,
+      dailyGoalMinutes: profile.dailyGoalMinutes,
+    })
+  }, [profile.avatarUrl, profile.bio, profile.dailyGoalMinutes, profile.examDate, profile.nickname])
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    onUpdateProfile({
+      nickname: form.nickname.trim() || '学习者',
+      avatarUrl: form.avatarUrl.trim(),
+      bio: form.bio.trim(),
+      examDate: form.examDate,
+      dailyGoalMinutes: Math.max(5, Number(form.dailyGoalMinutes) || 45),
+    })
+    setMessage('已保存')
+    window.setTimeout(() => setMessage(''), 1600)
+  }
+
+  return (
+    <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
+      <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-gray-950">个人中心</h1>
+          <p className="mt-1 text-xs text-gray-500">管理头像昵称、学习目标和成就点兑换。</p>
+        </div>
+        <div className="rounded-2xl bg-white/90 px-4 py-2 text-right shadow-sm ring-1 ring-white">
+          <p className="text-xl font-black text-gray-950">{rewardState.availablePoints}</p>
+          <p className="text-[11px] font-bold text-gray-400">可用成就点</p>
+        </div>
+      </header>
+
+      <section className="mb-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <form onSubmit={handleSubmit} className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
+          <div className="mb-5 flex flex-wrap items-center gap-4">
+            <ProfileAvatar profile={{ ...profile, avatarUrl: form.avatarUrl, nickname: form.nickname || profile.nickname, initials: (form.nickname || profile.nickname).slice(0, 2).toUpperCase() }} size="lg" />
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-300">Profile</p>
+              <h2 className="mt-1 text-xl font-black text-gray-950">{form.nickname || profile.nickname}</h2>
+              <p className="mt-1 text-xs font-bold text-gray-400">{cloud.enabled ? cloud.message : '本地浏览器数据'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-sm font-black text-gray-800">昵称</span>
+              <input
+                value={form.nickname}
+                onChange={(event) => setForm((current) => ({ ...current, nickname: event.target.value }))}
+                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
+                placeholder="给自己起个学习名"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-black text-gray-800">头像图片链接</span>
+              <input
+                value={form.avatarUrl}
+                onChange={(event) => setForm((current) => ({ ...current, avatarUrl: event.target.value }))}
+                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
+                placeholder="https://..."
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-black text-gray-800">考试日期</span>
+              <input
+                type="date"
+                value={form.examDate}
+                onChange={(event) => setForm((current) => ({ ...current, examDate: event.target.value }))}
+                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-black text-gray-800">每日专注目标</span>
+              <input
+                type="number"
+                min="5"
+                step="5"
+                value={form.dailyGoalMinutes}
+                onChange={(event) => setForm((current) => ({ ...current, dailyGoalMinutes: event.target.value }))}
+                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
+              />
+            </label>
+          </div>
+
+          <label className="mt-4 block">
+            <span className="mb-2 block text-sm font-black text-gray-800">个人签名</span>
+            <textarea
+              value={form.bio}
+              onChange={(event) => setForm((current) => ({ ...current, bio: event.target.value }))}
+              rows={3}
+              className="w-full resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold leading-6 text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
+              placeholder="写一句给复习中的自己看的话"
+            />
+          </label>
+
+          <div className="mt-5 flex items-center justify-end gap-3">
+            {message && <span className="text-xs font-black text-green-600">{message}</span>}
+            <button type="submit" className="h-10 rounded-xl bg-gray-950 px-5 text-sm font-black text-white hover:bg-gray-800">
+              保存资料
+            </button>
+          </div>
+        </form>
+
+        <aside className="space-y-5">
+          <section className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
+            <h2 className="text-sm font-black text-gray-950">学习资产</h2>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-gray-50 px-3 py-3">
+                <p className="text-2xl font-black text-gray-950">{summary.mastered}</p>
+                <p className="text-[11px] font-bold text-gray-400">已掌握卡片</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 px-3 py-3">
+                <p className="text-2xl font-black text-gray-950">{rewardState.earnedItems.length}</p>
+                <p className="text-[11px] font-bold text-gray-400">已获成就</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 px-3 py-3">
+                <p className="text-2xl font-black text-gray-950">{rewardState.totalPoints}</p>
+                <p className="text-[11px] font-bold text-gray-400">累计点数</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 px-3 py-3">
+                <p className="text-2xl font-black text-gray-950">{rewardState.spentPoints}</p>
+                <p className="text-[11px] font-bold text-gray-400">已兑换</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-black text-gray-950">奖励兑换</h2>
+              <span className="rounded-full bg-green-50 px-2 py-1 text-[11px] font-black text-green-700">{rewardState.availablePoints} 点可用</span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {REWARD_OPTIONS.map((reward) => {
+                const redeemed = rewardState.redeemedRewards.some((item) => item.rewardId === reward.id)
+                const affordable = rewardState.availablePoints >= reward.cost
+                return (
+                  <div key={reward.id} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-black text-gray-950">{reward.title}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-gray-500">{reward.description}</p>
+                      </div>
+                      <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-black text-gray-500">{reward.badge}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRedeemReward(reward.id)}
+                      disabled={redeemed || !affordable}
+                      className="mt-3 h-9 w-full rounded-xl bg-gray-950 text-xs font-black text-white hover:bg-gray-800 disabled:bg-gray-200 disabled:text-gray-400"
+                    >
+                      {redeemed ? '已兑换' : `${reward.cost} 点兑换`}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        </aside>
+      </section>
+
+      <AchievementPanel data={data} />
+    </Shell>
+  )
 }
 
 function PixelItemIcon({ name, earned }) {
@@ -1297,6 +1670,49 @@ function AchievementPanel({ data, collapsed = false, onToggle }) {
   )
 }
 
+function AchievementSummaryPanel({ data }) {
+  const rewardState = getRewardState(data)
+  const nextAchievements = rewardState.items.filter((achievement) => !achievement.earned).slice(0, 2)
+  const recentEarned = rewardState.earnedItems.slice(-2)
+  const previewItems = nextAchievements.length > 0 ? nextAchievements : recentEarned
+
+  return (
+    <section className="mb-5 rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
+      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[240px_minmax(0,1fr)_180px]">
+        <div className="border-b border-gray-100 p-5 lg:border-b-0 lg:border-r">
+          <p className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-300">Achievements</p>
+          <h2 className="mt-2 text-sm font-black text-gray-950">成就与奖励</h2>
+          <p className="mt-1 text-xs leading-relaxed text-gray-400">这里只放进度摘要，完整物品墙在个人页。</p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
+          {previewItems.length === 0 && <p className="text-sm font-bold text-gray-400">先添加第一张卡片，成就会开始点亮。</p>}
+          {previewItems.map((achievement) => (
+            <div key={achievement.id} className="flex items-center gap-3 rounded-xl bg-gray-50 px-3 py-3">
+              <PixelItemIcon name={achievement.icon} earned={achievement.earned} />
+              <div className="min-w-0">
+                <p className="text-sm font-black text-gray-900">{achievement.title}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{achievement.description}</p>
+                <p className="mt-1 text-[11px] font-black text-gray-400">{achievement.earned ? '已达成' : achievement.progressText}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-row items-center justify-between gap-3 border-t border-gray-100 p-5 lg:flex-col lg:items-stretch lg:justify-center lg:border-l lg:border-t-0">
+          <div>
+            <p className="text-3xl font-black text-gray-950">{rewardState.availablePoints}</p>
+            <p className="text-xs font-bold text-gray-400">可兑换点数</p>
+          </div>
+          <Link to="/profile" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-gray-950 px-4 text-xs font-black text-white hover:bg-gray-800">
+            <Gift size={14} /> 去兑换
+          </Link>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function DailyReviewPanel({ data, selectedDeckId, onSelectDeck, onSaveDailyLog, onCreateDailyCards, collapsed = false, onToggle }) {
   const dateKey = todayKey()
   const existingLog = getDailyLog(data, dateKey)
@@ -1430,8 +1846,7 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDai
   const [selectedDeckId, setSelectedDeckId] = useState(data.decks[0]?.id ?? null)
   const [selectedSection, setSelectedSection] = useState('全部')
   const [collapsedPanels, setCollapsedPanels] = useState({
-    daily: false,
-    achievements: false,
+    daily: true,
     sections: false,
     deckList: false,
     currentDeck: false,
@@ -1516,22 +1931,6 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDai
       </header>
 
       <LearningOverviewPanel data={data} />
-
-      <DailyReviewPanel
-        data={data}
-        selectedDeckId={selectedDeckId}
-        onSelectDeck={setSelectedDeckId}
-        onSaveDailyLog={onSaveDailyLog}
-        onCreateDailyCards={onCreateDailyCards}
-        collapsed={collapsedPanels.daily}
-        onToggle={() => toggleDeckPanel('daily')}
-      />
-
-      <AchievementPanel
-        data={data}
-        collapsed={collapsedPanels.achievements}
-        onToggle={() => toggleDeckPanel('achievements')}
-      />
 
       <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_340px] gap-5 items-start">
         <aside className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
@@ -1669,6 +2068,20 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDai
           </>}
         </aside>
       </div>
+
+      <div className="mt-5">
+        <DailyReviewPanel
+          data={data}
+          selectedDeckId={selectedDeckId}
+          onSelectDeck={setSelectedDeckId}
+          onSaveDailyLog={onSaveDailyLog}
+          onCreateDailyCards={onCreateDailyCards}
+          collapsed={collapsedPanels.daily}
+          onToggle={() => toggleDeckPanel('daily')}
+        />
+      </div>
+
+      <AchievementSummaryPanel data={data} />
     </Shell>
   )
 }
@@ -3363,6 +3776,44 @@ export default function App() {
     })
   }
 
+  function updateProfile(profileValue) {
+    startTransition(() => {
+      setData((current) => ({
+        ...current,
+        profile: {
+          ...getStoredProfile(current),
+          ...profileValue,
+          updatedAt: Date.now(),
+        },
+      }))
+    })
+  }
+
+  function redeemReward(rewardId) {
+    startTransition(() => {
+      setData((current) => {
+        const reward = REWARD_OPTIONS.find((item) => item.id === rewardId)
+        if (!reward) return current
+
+        const rewardState = getRewardState(current)
+        const alreadyRedeemed = rewardState.redeemedRewards.some((item) => item.rewardId === rewardId)
+        if (alreadyRedeemed || rewardState.availablePoints < reward.cost) return current
+
+        return {
+          ...current,
+          profile: {
+            ...getStoredProfile(current),
+            redeemedRewards: [
+              ...rewardState.redeemedRewards,
+              { rewardId, redeemedAt: Date.now() },
+            ],
+            updatedAt: Date.now(),
+          },
+        }
+      })
+    })
+  }
+
   const existingNames = data.decks
     .filter((deck) => (deckDialog.mode === 'edit' && deckDialog.deck ? deck.id !== deckDialog.deck.id : true))
     .map((deck) => deck.name)
@@ -3385,6 +3836,7 @@ export default function App() {
         <Route path="/browse" element={<Browse data={data} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} />} />
         <Route path="/organize" element={<Organize data={data} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/import" element={<ImportCards data={data} onCreateCards={createCards} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/profile" element={<Profile data={data} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />
         <Route path="/cards/new/:deckId" element={<AddCard data={data} onCreateCard={createCard} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/study/:deckId" element={<Study data={data} onReviewCard={reviewCard} studyDeckId={studyDeckId} cloud={cloud} />} />
       </Routes>

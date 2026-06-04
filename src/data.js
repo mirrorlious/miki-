@@ -3,7 +3,16 @@ const MAX_REVIEW_INTERVAL_DAYS=365
 export const todayKey=()=>new Date().toISOString().slice(0,10)
 
 export const seedData=()=>({
-  profile:{name:'mik!',streak:6},
+  profile:{
+    name:'mik!',
+    nickname:'mik!',
+    avatarUrl:'',
+    bio:'把今天能记住的一点点先留下来。',
+    examDate:'',
+    dailyGoalMinutes:45,
+    redeemedRewards:[],
+    streak:6,
+  },
   decks:[
     {id:'deck-english',name:'考研英语高频词',description:'先把最常错的词反复压熟。',section:'英语',chapter:'词汇',color:'sun',createdAt:Date.now()-86400000*8},
     {id:'deck-history',name:'中国近代史时间线',description:'事件、年份、意义一起记。',section:'法制史',chapter:'近现代法制',color:'sea',createdAt:Date.now()-86400000*4},
