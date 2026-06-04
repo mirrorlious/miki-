@@ -96,27 +96,27 @@ const STUDY_GRADE_OPTIONS = [
 const PIXEL_ITEM_BADGES = {
   card: {
     palette: { d: '#244938', g: '#34c759', l: '#9ff2b1', y: '#f9d96b', w: '#fff7d6' },
-    pixels: ['...........', '...ddddd...', '..dgggggd..', '.dggwgggd..', '.dggggggd..', '.dgyyyygd..', '.dggggggd..', '..dgggggd..', '...ddddd...', '....dyd....', '...........'],
+    pixels: ['...........', '..ddddddd..', '.dgggggggd.', '.dglgglggd.', '.dgggggggd.', '.dggdddggd.', '.dgggggggd.', '.dglgglggd.', '.dgggggggd.', '..ddddddd..', '...........'],
   },
   calendar: {
-    palette: { d: '#23384f', b: '#63b3ed', l: '#d8f3ff', r: '#ff6b6b', w: '#ffffff', y: '#fde047' },
-    pixels: ['...........', '...r...r...', '..ddddddd..', '.dbbbbbbd..', '.dbllllbd..', '.dblwlwbd..', '.dbllllbd..', '.dbllylbd..', '.dbbbbbbd..', '..ddddddd..', '...........'],
+    palette: { d: '#23384f', s: '#63b3ed', l: '#d8f3ff', r: '#ff6b6b', w: '#ffffff', y: '#fde047' },
+    pixels: ['...........', '...r...r...', '..ddddddd..', '.dsssssssd.', '.dslssslsd.', '.dsssssssd.', '.dsllyllsd.', '.dsssssssd.', '.dsssssssd.', '..ddddddd..', '...........'],
   },
   review: {
-    palette: { d: '#4a3424', o: '#f59e0b', y: '#fde68a', b: '#38bdf8', w: '#fff7d6' },
-    pixels: ['.....d.....', '....dod....', '...doyod...', '..doyyyod..', '.doywbbyod.', 'doywbbbyyod', '.doywbbyod.', '..doyyyod..', '...doyod...', '....dod....', '.....d.....'],
+    palette: { d: '#4a3424', r: '#ef4444', y: '#fde68a', b: '#38bdf8', w: '#fff7d6' },
+    pixels: ['.....d.....', '...ddddd...', '..dwwwwwd..', '.dwwrwwwd..', '.dwwrrwwd..', 'dwwwwywwwd.', '.dwwbbwwd..', '.dwwwbwwd..', '..dwwwwwd..', '...ddddd...', '.....d.....'],
   },
   note: {
     palette: { d: '#4b2f5f', p: '#c084fc', l: '#f3e8ff', y: '#facc15', w: '#ffffff' },
-    pixels: ['...........', '..dddddd...', '.dlllllld..', '.dlppplld..', '.dlllllld..', '.dlllylld..', '.dllllpld..', '.dllllyyd..', '..ddddyd...', '....dyd....', '...........'],
+    pixels: ['...........', '..dd...dd..', '.dppdddppd.', '.dpppppppd.', '.dplllpppd.', '.dpppppppd.', '.dplllpppd.', '.dpppppppd.', '.dppdddppd.', '..dd...dd..', '...........'],
   },
   link: {
     palette: { d: '#164e63', c: '#22d3ee', l: '#a5f3fc', w: '#ecfeff' },
-    pixels: ['...........', '..dd...dd..', '.dcld.dlcd.', 'dcldd.ddlcd', 'dcddcccddcd', '.ddcccccdd.', '.ddcccccdd.', 'dcddcccddcd', 'dcldd.ddlcd', '.dcld.dlcd.', '..dd...dd..'],
+    pixels: ['...........', '..dddd.....', '.dccccd....', 'dcc...ccd..', 'dcc...ccd..', '.dccccd....', '...dddd....', '....dccccd.', '..dcc...ccd', '..dcc...ccd', '....dddd...'],
   },
   folder: {
     palette: { d: '#5b3718', b: '#a16207', y: '#fbbf24', l: '#fde68a', k: '#3f2a16' },
-    pixels: ['...........', '..dddd.....', '.dyyyddddd.', '.dyyyyyyyd.', '.dylllllyd.', '.dybbbbbyd.', '.dyblblbyd.', '.dybbbbbyd.', '..ddddddd..', '...kkkkk...', '...........'],
+    pixels: ['...........', '...ddddd...', '..dyyyyyd..', '.dyyyyyyyd.', '.dllllllld.', '.dbbbbbbbd.', '.dbbbybbbd.', '.dbbbybbbd.', '.dbbbbbbbd.', '..ddddddd..', '...kkkkk...'],
   },
   flame: {
     palette: { d: '#4b1d1d', r: '#ef4444', o: '#f97316', y: '#fde047', b: '#7c2d12' },
@@ -124,11 +124,11 @@ const PIXEL_ITEM_BADGES = {
   },
   focus: {
     palette: { d: '#213547', b: '#3b82f6', c: '#93c5fd', w: '#f8fafc', y: '#facc15' },
-    pixels: ['...........', '..ddddddd..', '.dbbbbbbbd.', '.dbcccccbd.', '.dbcwcwcbd.', '.dbcwwwcbd.', '.dbcwcwcbd.', '.dbcccccbd.', '.dbbbbbbbd.', '..ddddddd..', '.....y.....'],
+    pixels: ['..d.....d..', '....ddd....', '...dbbbd...', '..dbbbbbd..', '..dbcbcbd..', '.dbbbbbbbd.', '.dbbbbbbbd.', '..ddddddd..', '..dyyyyd...', '....dyd....', '...........'],
   },
   timer: {
     palette: { d: '#2f2a3f', p: '#a78bfa', l: '#ddd6fe', w: '#ffffff', g: '#34c759' },
-    pixels: ['....ddd....', '...dwwwd...', '..dplllpd..', '.dpllwllpd.', '.dpllglld..', '.dpllgllpd.', '.dplllllpd.', '..dplllpd..', '...dppd....', '..dd..dd...', '...........'],
+    pixels: ['...........', '..ddddddd..', '...dwwwd...', '...dwlwd...', '....dld....', '.....d.....', '....dgd....', '...dglgd...', '...dgggd...', '..ddddddd..', '...........'],
   },
 }
 const ACHIEVEMENTS = [
