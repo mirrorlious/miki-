@@ -3,8 +3,9 @@ import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 const FIELD_SEPARATOR = '\x1f'
-const MAX_SIDE_HTML_LENGTH = 120000
-const MAX_CARD_CSS_LENGTH = 20000
+const MAX_SIDE_HTML_LENGTH = 36000
+const MAX_CARD_CSS_LENGTH = 8000
+const MAX_CARD_RICH_CONTENT_LENGTH = 52000
 const SCRIPT_CALL_PATTERN = /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i
 
 let sqlPromise = null
@@ -202,6 +203,7 @@ function makeStoredCss(css = '') {
   const safeCss = String(css)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/@import[^;]+;/gi, '')
+    .replace(/url\((?:"[^"]*"|'[^']*'|[^)]*)\)/gi, 'none')
     .trim()
   return safeCss.length <= MAX_CARD_CSS_LENGTH ? safeCss : ''
 }
@@ -324,9 +326,18 @@ export async function parseApkgFile(file, options = {}) {
         skippedCards += 1
         continue
       }
-      const frontHtml = pickSideHtml({ renderedHtml: renderedFrontHtml, fields, side: 'front', fallbackText: frontText })
-      const backHtml = pickSideHtml({ renderedHtml: answerHtml, fields, side: 'back', fallbackText: backText })
-      const cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
+      let frontHtml = pickSideHtml({ renderedHtml: renderedFrontHtml, fields, side: 'front', fallbackText: frontText })
+      let backHtml = pickSideHtml({ renderedHtml: answerHtml, fields, side: 'back', fallbackText: backText })
+      let cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
+      if (frontHtml.length + backHtml.length + cardCss.length > MAX_CARD_RICH_CONTENT_LENGTH) {
+        if (frontHtml.length + backHtml.length <= MAX_CARD_RICH_CONTENT_LENGTH) {
+          cardCss = ''
+        } else {
+          frontHtml = ''
+          backHtml = ''
+          cardCss = ''
+        }
+      }
 
       deckNames.add(deckName)
       const deckSummaryKey = deckPath.join('::') || deckName

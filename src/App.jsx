@@ -548,6 +548,34 @@ function CardContent({ card, side, className = '', fallbackClassName = '', place
   return <p className={fallbackClassName || className}>{fallbackText}</p>
 }
 
+function makeLocalCacheData(data) {
+  return {
+    ...data,
+    cards: Array.isArray(data.cards)
+      ? data.cards.map((card) => {
+        const lightCard = { ...card }
+        delete lightCard.frontHtml
+        delete lightCard.backHtml
+        delete lightCard.cardCss
+        return lightCard
+      })
+      : [],
+  }
+}
+
+function persistDataToLocalCache(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (error) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(makeLocalCacheData(data)))
+      console.warn('Local cache was too large, saved a lightweight copy without Anki HTML/CSS.', error)
+    } catch (fallbackError) {
+      console.warn('Local cache write skipped because browser storage is full.', fallbackError)
+    }
+  }
+}
+
 function toLocalDateKey(value = new Date()) {
   const date = new Date(value)
   const year = date.getFullYear()
@@ -4058,7 +4086,7 @@ export default function App() {
   }, [location.pathname])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    persistDataToLocalCache(data)
   }, [data])
 
   useEffect(() => {
