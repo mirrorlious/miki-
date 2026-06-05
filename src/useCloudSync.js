@@ -42,6 +42,10 @@ function mapAuthError(error) {
   }
 }
 
+function isPermissionDenied(error) {
+  return error?.code === 'permission-denied' || error?.message?.includes('permission-denied')
+}
+
 function validateEmailPassword(email, password, { allowEmptyPassword = false } = {}) {
   const cleanEmail = email.trim()
   if (!cleanEmail) return '请输入邮箱。'
@@ -347,8 +351,17 @@ async function migrateLegacyPayload(uid, user, fns) {
   if (stateSnap.exists() && stateSnap.data()?.payloadSplitCompleted) return
 
   const alreadyModern = await hasModernData(uid, fns)
-  const legacySnap = await fns.getDoc(fns.doc(db, 'memorizerUsers', uid))
-  const payload = legacySnap.data()?.payload
+  let payload = null
+  let legacySource = 'memorizerUsers-payload'
+
+  try {
+    const legacySnap = await fns.getDoc(fns.doc(db, 'memorizerUsers', uid))
+    payload = legacySnap.data()?.payload ?? null
+    if (!payload) legacySource = 'no-legacy-payload'
+  } catch (error) {
+    if (!isPermissionDenied(error)) throw error
+    legacySource = 'legacy-path-permission-denied'
+  }
 
   if (!alreadyModern && payload?.decks && payload?.cards) {
     await persistDataDiff(uid, normalizeDataShape({}), normalizeDataShape(payload))
@@ -356,7 +369,7 @@ async function migrateLegacyPayload(uid, user, fns) {
 
   await fns.setDoc(stateRef, {
     payloadSplitCompleted: true,
-    source: alreadyModern ? 'modern-data-exists' : 'memorizerUsers-payload',
+    source: alreadyModern ? 'modern-data-exists' : legacySource,
     owner: {
       uid,
       email: user.email ?? null,
@@ -468,7 +481,7 @@ export function useCloudSync(data, setData) {
           const uid = activeUidRef.current
           if (!alive || !uid) return
 
-          const cloudData = buildCloudData(cloudPartsRef.current, latestDataRef.current)
+          const cloudData = buildCloudData(cloudPartsRef.current, normalizeDataShape({}))
           const merged = mergeCloudIntoLocal(latestDataRef.current, cloudPartsRef.current)
 
           lastPersistedDataRef.current = cloudData

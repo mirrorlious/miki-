@@ -3,6 +3,51 @@
 @tailwind utilities;
 
 @layer components {
+  .anki-card-content {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .anki-card-content img,
+  .anki-card-content video {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0.75rem auto;
+    border-radius: 8px;
+  }
+
+  .anki-card-content audio {
+    width: 100%;
+    max-width: 360px;
+    margin: 0.75rem auto;
+  }
+
+  .anki-card-content table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+  }
+
+  .anki-card-content td,
+  .anki-card-content th {
+    border: 1px solid rgb(229 231 235);
+    padding: 0.35rem 0.5rem;
+  }
+
+  .anki-card-content .anki-cloze {
+    border-radius: 0.35rem;
+    background: rgb(219 234 254);
+    color: rgb(29 78 216);
+    padding: 0.05rem 0.3rem;
+    font-weight: 900;
+  }
+
+  .anki-card-content .anki-cloze-revealed {
+    background: rgb(220 252 231);
+    color: rgb(22 101 52);
+  }
+
   .brand-logo {
     @apply flex h-8 w-12 items-center justify-center rounded-lg bg-[#416fae] text-white shadow-sm;
     font-family: 'Segoe Print', 'Comic Sans MS', 'Bradley Hand ITC', cursive;

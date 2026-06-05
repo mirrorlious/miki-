@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import DOMPurify from 'dompurify'
 import {
   AlignLeft,
   BookOpen,
@@ -41,8 +42,10 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
+import { parseApkgFile } from './apkgImport'
 import { parseBulkCards, parseMarkdownCards } from './cardImport'
 import { loadData, scheduleReview, stats, STORAGE_KEY, todayKey } from './data'
+import { storage } from './lib/firebase'
 import { useCloudSync } from './useCloudSync'
 
 const DECK_COLOR_OPTIONS = [
@@ -59,6 +62,7 @@ const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对
 const ACTIVITY_TICK_SECONDS = 10
 const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
+const APKG_INLINE_MEDIA_BYTES = 180 * 1024
 const STUDY_GRADE_OPTIONS = [
   {
     grade: 0,
@@ -238,10 +242,10 @@ const REWARD_OPTIONS = [
   },
   {
     id: 'profile-frame',
-    title: '头像边框',
-    description: '在个人页标记一枚已兑换头像边框。',
+    title: '学习贴纸',
+    description: '在个人页标记一枚已兑换学习贴纸。',
     cost: 40,
-    badge: 'Frame',
+    badge: 'Sticker',
   },
   {
     id: 'vip-week',
@@ -358,6 +362,85 @@ function getCardAnnotations(card) {
 
 function getCardLinks(card) {
   return Array.isArray(card?.links) ? card.links : []
+}
+
+function getCardSideHtml(card, side) {
+  return side === 'front' ? card?.frontHtml : card?.backHtml
+}
+
+function getCardSideText(card, side) {
+  return side === 'front' ? card?.front : card?.back
+}
+
+function looksLikeHtml(value = '') {
+  return /<\/?[a-z][\s\S]*>/i.test(String(value))
+}
+
+function htmlToPlainText(html = '') {
+  if (typeof document === 'undefined') return String(html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  const element = document.createElement('div')
+  element.innerHTML = String(html)
+  return (element.textContent || element.innerText || '').replace(/\s+/g, ' ').trim()
+}
+
+function sanitizeCssScopeId(value = '') {
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80) || 'card'
+}
+
+function scopeAnkiCss(css = '', scopeSelector = '.anki-card-content') {
+  const cleanCss = String(css)
+    .replace(/<\/?style[^>]*>/gi, '')
+    .replace(/@import[^;]+;/gi, '')
+    .trim()
+
+  if (!cleanCss) return ''
+
+  return cleanCss.replace(/(^|})\s*([^@{}][^{}]*)\{/g, (match, boundary, selectorText) => {
+    const scopedSelectors = selectorText
+      .split(',')
+      .map((selector) => selector.trim())
+      .filter(Boolean)
+      .map((selector) => {
+        if (/^(?:from|to|\d+(?:\.\d+)?%)$/i.test(selector)) return selector
+        if (/^(?:html|body|\.card|#qa|#content)$/i.test(selector)) return scopeSelector
+        if (selector.startsWith(scopeSelector)) return selector
+        return `${scopeSelector} ${selector}`
+      })
+      .join(', ')
+
+    return scopedSelectors ? `${boundary} ${scopedSelectors} {` : match
+  })
+}
+
+function sanitizeCardHtml(html) {
+  return DOMPurify.sanitize(String(html ?? ''), {
+    ADD_TAGS: ['audio', 'video', 'source'],
+    ADD_ATTR: ['alt', 'class', 'colspan', 'controls', 'height', 'href', 'rel', 'rowspan', 'src', 'style', 'target', 'title', 'width'],
+  })
+}
+
+function CardContent({ card, side, className = '', fallbackClassName = '', placeholder = '' }) {
+  const explicitHtml = getCardSideHtml(card, side)
+  const text = getCardSideText(card, side) || placeholder
+  const html = explicitHtml || (card?.template === 'html' && looksLikeHtml(text) ? text : '')
+
+  if (html) {
+    const scopeId = sanitizeCssScopeId(`${card?.id ?? 'preview'}-${side}`)
+    const scopedCss = scopeAnkiCss(card?.cardCss, `[data-anki-card="${scopeId}"]`)
+
+    return (
+      <>
+        {scopedCss && <style>{scopedCss}</style>}
+        <div
+          data-anki-card={scopeId}
+          className={`anki-card-content ${className}`}
+          dangerouslySetInnerHTML={{ __html: sanitizeCardHtml(html) }}
+        />
+      </>
+    )
+  }
+
+  return <p className={fallbackClassName || className}>{text}</p>
 }
 
 function toLocalDateKey(value = new Date()) {
@@ -763,7 +846,6 @@ function getStoredProfile(data) {
   return {
     name: profile.name ?? '',
     nickname: profile.nickname ?? profile.name ?? '',
-    avatarUrl: profile.avatarUrl ?? '',
     bio: profile.bio ?? '',
     examDate: profile.examDate ?? '',
     dailyGoalMinutes: Number(profile.dailyGoalMinutes) || 45,
@@ -778,7 +860,6 @@ function getProfile(data, cloud) {
   return {
     ...stored,
     nickname,
-    initials: nickname.slice(0, 2).toUpperCase(),
   }
 }
 
@@ -834,27 +915,6 @@ function ToolbarButton({ to, icon: Icon, label, disabled = false }) {
       <Icon size={16} />
       {label}
     </NavLink>
-  )
-}
-
-function ProfileAvatar({ profile, size = 'md' }) {
-  const dimensionClass = size === 'lg' ? 'h-20 w-20 text-2xl' : size === 'sm' ? 'h-9 w-9 text-xs' : 'h-11 w-11 text-sm'
-  const imageSizeClass = size === 'lg' ? 'h-20 w-20' : size === 'sm' ? 'h-9 w-9' : 'h-11 w-11'
-
-  if (profile.avatarUrl) {
-    return (
-      <img
-        src={profile.avatarUrl}
-        alt={profile.nickname}
-        className={`${imageSizeClass} rounded-2xl border border-white object-cover shadow-sm`}
-      />
-    )
-  }
-
-  return (
-    <div className={`${dimensionClass} grid shrink-0 place-items-center rounded-2xl bg-gray-950 font-black text-white shadow-sm`}>
-      {profile.initials}
-    </div>
   )
 }
 
@@ -1128,20 +1188,17 @@ function Shell({ children, data, cloud, studyDeckId }) {
   const firstDeckId = studyDeckId ?? data.decks[0]?.id
   const latestSyncAt = cloud.lastWriteAt ?? cloud.lastReadAt ?? cloud.lastSyncedAt
   const syncLabel = !cloud.enabled
-    ? '本地模式'
+    ? '本地'
     : !cloud.user
       ? '待登录'
       : cloud.syncState === 'error'
-        ? '同步失败'
-        : cloud.syncState === 'syncing'
-          ? '写入中'
-          : cloud.syncState === 'connecting'
-            ? '连接中'
-            : cloud.lastWriteAt
-              ? `写入 ${formatCompactSyncTime(cloud.lastWriteAt)}`
-              : cloud.lastReadAt
-                ? `读取 ${formatCompactSyncTime(cloud.lastReadAt)}`
-                : '已连接'
+        ? '失败'
+        : cloud.syncState === 'connecting'
+          ? '连接'
+          : '同步'
+  const syncTimeLabel = cloud.enabled && cloud.user
+    ? (latestSyncAt ? formatCompactSyncTime(latestSyncAt) : '--:--')
+    : ''
   const syncTitle = [
     cloud.message,
     cloud.lastWriteAt ? `上次写入：${formatSyncTime(cloud.lastWriteAt)}` : '',
@@ -1159,7 +1216,6 @@ function Shell({ children, data, cloud, studyDeckId }) {
       ? 'bg-gray-50 text-gray-700 hover:bg-gray-100'
       : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
-  const rewardState = getRewardState(data)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
 
   const navItems = [
@@ -1219,23 +1275,20 @@ function Shell({ children, data, cloud, studyDeckId }) {
                 onClick={cloud.onManualSync}
                 disabled={syncBusy}
                 title={syncTitle}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 ${syncPillClass}`}
+                className={`grid h-8 w-[94px] grid-cols-[14px_1fr_auto] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 ${syncPillClass}`}
               >
                 <Cloud size={14} className={syncIconClass} />
                 <span className="whitespace-nowrap">{syncLabel}</span>
+                <span className="font-mono text-[10px] font-black tabular-nums text-gray-400">{syncTimeLabel}</span>
               </button>
             ) : (
-              <span className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black ${syncPillClass}`} title={syncTitle || cloud.message}>
+              <span className={`grid h-8 w-[78px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black ${syncPillClass}`} title={syncTitle || cloud.message}>
                 {cloud.enabled ? <Cloud size={14} className={syncIconClass} /> : <CloudOff size={14} className={syncIconClass} />}
                 <span className="whitespace-nowrap">{syncLabel}</span>
               </span>
             )}
-            <Link to="/profile" className="flex min-w-0 items-center gap-2 rounded-xl px-1.5 py-1 transition-colors hover:bg-gray-50 md:px-2">
-              <ProfileAvatar profile={profile} size="sm" />
-              <span className="hidden min-w-0 md:block">
-                <span className="block truncate font-black text-gray-800">{profile.nickname}</span>
-                <span className="block text-[10px] font-bold text-gray-400">{rewardState.availablePoints} 可用点</span>
-              </span>
+            <Link to="/profile" className="flex h-8 max-w-[104px] min-w-[48px] items-center rounded-xl px-2 transition-colors hover:bg-gray-50" title={profile.nickname}>
+              <span className="block truncate text-[11px] font-black text-gray-800">{profile.nickname}</span>
             </Link>
             {cloud.enabled && !cloud.user && (
               <button type="button" onClick={openAuthDialog} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-700 transition-colors hover:bg-gray-50">
@@ -1375,10 +1428,8 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
   const profile = getProfile(data, cloud)
   const rewardState = getRewardState(data)
   const summary = stats(data)
-  const avatarInputRef = useRef(null)
   const [form, setForm] = useState({
     nickname: profile.nickname,
-    avatarUrl: profile.avatarUrl,
     bio: profile.bio,
     examDate: profile.examDate,
     dailyGoalMinutes: profile.dailyGoalMinutes,
@@ -1388,18 +1439,17 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
   useEffect(() => {
     setForm({
       nickname: profile.nickname,
-      avatarUrl: profile.avatarUrl,
       bio: profile.bio,
       examDate: profile.examDate,
       dailyGoalMinutes: profile.dailyGoalMinutes,
     })
-  }, [profile.avatarUrl, profile.bio, profile.dailyGoalMinutes, profile.examDate, profile.nickname])
+  }, [profile.bio, profile.dailyGoalMinutes, profile.examDate, profile.nickname])
 
   function handleSubmit(event) {
     event.preventDefault()
     onUpdateProfile({
       nickname: form.nickname.trim() || '学习者',
-      avatarUrl: form.avatarUrl.trim(),
+      avatarUrl: '',
       bio: form.bio.trim(),
       examDate: form.examDate,
       dailyGoalMinutes: Math.max(5, Number(form.dailyGoalMinutes) || 45),
@@ -1408,26 +1458,12 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
     window.setTimeout(() => setMessage(''), 1600)
   }
 
-  async function handleAvatarFile(event) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-
-    try {
-      const avatarUrl = await compressImageFile(file, { maxSize: 320, quality: 0.82 })
-      setForm((current) => ({ ...current, avatarUrl }))
-      setMessage('头像已读取，记得保存')
-    } catch (error) {
-      setMessage(error?.message || '头像读取失败')
-    }
-  }
-
   return (
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-gray-950">个人中心</h1>
-          <p className="mt-1 text-xs text-gray-500">管理头像昵称、学习目标和成就点兑换。</p>
+          <p className="mt-1 text-xs text-gray-500">管理昵称、学习目标和成就点兑换。</p>
         </div>
         <div className="rounded-2xl bg-white/90 px-4 py-2 text-right shadow-sm ring-1 ring-white">
           <p className="text-xl font-black text-gray-950">{rewardState.availablePoints}</p>
@@ -1438,7 +1474,6 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
       <section className="mb-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <form onSubmit={handleSubmit} className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
           <div className="mb-5 flex flex-wrap items-center gap-4">
-            <ProfileAvatar profile={{ ...profile, avatarUrl: form.avatarUrl, nickname: form.nickname || profile.nickname, initials: (form.nickname || profile.nickname).slice(0, 2).toUpperCase() }} size="lg" />
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-300">Profile</p>
               <h2 className="mt-1 text-xl font-black text-gray-950">{form.nickname || profile.nickname}</h2>
@@ -1456,29 +1491,6 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
                 placeholder="给自己起个学习名"
               />
             </label>
-
-            <div className="block">
-              <span className="mb-2 block text-sm font-black text-gray-800">头像图片</span>
-              <div className="flex h-11 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => avatarInputRef.current?.click()}
-                  className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-black text-gray-700 hover:bg-gray-100"
-                >
-                  <Image size={16} /> 选择本机图片
-                </button>
-                {form.avatarUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setForm((current) => ({ ...current, avatarUrl: '' }))}
-                    className="h-11 rounded-2xl bg-red-50 px-4 text-sm font-black text-red-600 hover:bg-red-100"
-                  >
-                    移除
-                  </button>
-                )}
-                <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarFile} className="hidden" />
-              </div>
-            </div>
 
             <label className="block">
               <span className="mb-2 block text-sm font-black text-gray-800">考试日期</span>
@@ -1943,7 +1955,7 @@ function DailyReviewPanel({ data, selectedDeckId, onSelectDeck, onSaveDailyLog, 
   useEffect(() => {
     setDraft(existingLog?.content ?? '')
     setMessage('')
-  }, [existingLog?.id, dateKey])
+  }, [existingLog?.content, existingLog?.id, dateKey])
 
   function handleSave() {
     onSaveDailyLog(dateKey, draft)
@@ -2323,13 +2335,15 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
     }
   }, [data.decks, selectedDeckId])
 
-  const visibleCards = data.cards
-    .filter((card) => !selectedDeckId || card.deckId === selectedDeckId)
-    .filter((card) => {
-      const keyword = query.trim().toLowerCase()
-      if (!keyword) return true
-      return `${card.front} ${card.back}`.toLowerCase().includes(keyword)
-    })
+  const visibleCards = useMemo(() => (
+    data.cards
+      .filter((card) => !selectedDeckId || card.deckId === selectedDeckId)
+      .filter((card) => {
+        const keyword = query.trim().toLowerCase()
+        if (!keyword) return true
+        return `${card.front} ${card.back}`.toLowerCase().includes(keyword)
+      })
+  ), [data.cards, query, selectedDeckId])
 
   const selectedCard = visibleCards.find((card) => card.id === selectedCardId) ?? visibleCards[0] ?? null
   const selectedDeck = data.decks.find((deck) => deck.id === selectedDeckId)
@@ -2343,7 +2357,7 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
       if (visibleCards.some((card) => card.id === current)) return current
       return visibleCards[0]?.id ?? null
     })
-  }, [selectedDeckId, query, data.cards])
+  }, [visibleCards])
 
   useEffect(() => {
     setAnnotationDraft('')
@@ -2452,10 +2466,20 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
           {selectedCard ? (
             <div className="p-4">
               <p className="text-xs font-bold text-gray-400 mb-2">Front</p>
-              <h3 className="text-lg font-black text-gray-950 break-words leading-relaxed">{selectedCard.front}</h3>
+              <CardContent
+                card={selectedCard}
+                side="front"
+                className="text-lg font-black text-gray-950 break-words leading-relaxed"
+                fallbackClassName="text-lg font-black text-gray-950 break-words leading-relaxed"
+              />
               <div className="my-5 h-px bg-gray-200" />
               <p className="text-xs font-bold text-gray-400 mb-2">Back</p>
-              <p className="text-base text-gray-700 break-words leading-relaxed">{selectedCard.back}</p>
+              <CardContent
+                card={selectedCard}
+                side="back"
+                className="text-base text-gray-700 break-words leading-relaxed"
+                fallbackClassName="text-base text-gray-700 break-words leading-relaxed"
+              />
               <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
                 <span className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">间隔 {selectedCard.review.interval} 天</span>
                 <span className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">复习 {selectedCard.review.reps} 次</span>
@@ -2721,16 +2745,49 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
   const [selectedDeckId, setSelectedDeckId] = useState(data.decks[0]?.id ?? '')
   const [importMode, setImportMode] = useState('qa')
   const [rawText, setRawText] = useState('')
+  const [apkgImport, setApkgImport] = useState(null)
+  const [isParsingFile, setIsParsingFile] = useState(false)
   const [message, setMessage] = useState('')
-  const parsedCards = useMemo(() => (
+  const parsedTextCards = useMemo(() => (
     importMode === 'markdown' ? parseMarkdownCards(rawText) : parseBulkCards(rawText)
   ), [importMode, rawText])
+  const parsedCards = importMode === 'anki' ? (apkgImport?.cards ?? []) : parsedTextCards
 
   useEffect(() => {
     if (!data.decks.find((deck) => deck.id === selectedDeckId)) {
       setSelectedDeckId(data.decks[0]?.id ?? '')
     }
   }, [data.decks, selectedDeckId])
+
+  async function resolveApkgMediaUrl(importId, media) {
+    if (media.blob.size <= APKG_INLINE_MEDIA_BYTES) {
+      return {
+        url: await readFileAsDataUrl(media.blob),
+        mode: 'inline',
+      }
+    }
+
+    if (!cloud.user || !storage) return null
+
+    const { getDownloadURL, ref, uploadBytes } = await import('firebase/storage')
+    const safeName = encodeURIComponent(media.name || media.zipName || `media-${Date.now()}`).replace(/%/g, '_')
+    const storagePath = `users/${cloud.user.uid}/anki-media/${importId}/${safeName}`
+    const mediaRef = ref(storage, storagePath)
+
+    await uploadBytes(mediaRef, media.blob, {
+      contentType: media.mimeType || media.blob.type || 'application/octet-stream',
+      customMetadata: {
+        originalName: media.name || '',
+        source: 'apkg',
+      },
+    })
+
+    return {
+      url: await getDownloadURL(mediaRef),
+      mode: 'storage',
+      storagePath,
+    }
+  }
 
   function handleImport() {
     if (!selectedDeckId) {
@@ -2748,17 +2805,52 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
 
   async function handleFile(event) {
     const file = event.target.files?.[0]
+    event.target.value = ''
     if (!file) return
 
     const lowerName = file.name.toLowerCase()
-    const isTextLike = file.type.startsWith('text/') || lowerName.endsWith('.md') || lowerName.endsWith('.csv') || lowerName.endsWith('.tsv')
+    const isAnkiPackage = lowerName.endsWith('.apkg') || lowerName.endsWith('.colpkg')
+    const isTextLike = file.type.startsWith('text/')
+      || lowerName.endsWith('.md')
+      || lowerName.endsWith('.csv')
+      || lowerName.endsWith('.tsv')
+      || lowerName.endsWith('.html')
+      || lowerName.endsWith('.htm')
 
-    if (!isTextLike) {
-      setMessage('图片、PDF、Word 需要先由 AI/OCR 导出成问题答案文本，再粘贴到这里。')
+    if (isAnkiPackage) {
+      const importId = `apkg-${Date.now()}`
+      setImportMode('anki')
+      setRawText('')
+      setApkgImport(null)
+      setIsParsingFile(true)
+      setMessage('正在解析 Anki 包...')
+
+      try {
+        const result = await parseApkgFile(file, {
+          importId,
+          resolveMediaUrl: (media) => resolveApkgMediaUrl(importId, media),
+        })
+        setApkgImport(result)
+        const mediaText = result.usedMediaCount > 0
+          ? `，媒体 ${result.resolvedMediaCount}/${result.usedMediaCount} 个`
+          : ''
+        setMessage(`已解析 ${result.cards.length} 张 Anki 卡${mediaText}。`)
+      } catch (error) {
+        setMessage(error?.message || 'Anki 包解析失败。')
+      } finally {
+        setIsParsingFile(false)
+      }
       return
     }
 
+    if (!isTextLike) {
+      setMessage('支持 .apkg/.colpkg、TXT、Markdown、CSV、TSV、HTML 文本；图片、PDF、Word 需要先由 AI/OCR 导出成文本。')
+      return
+    }
+
+    setApkgImport(null)
     if (lowerName.endsWith('.md')) setImportMode('markdown')
+    else if (importMode === 'anki') setImportMode('qa')
     setRawText(await file.text())
     setMessage(`已读取 ${file.name}`)
   }
@@ -2783,17 +2875,22 @@ constraint\t限制；约束条件`
   - 密度较高，能让人漂浮`
   const sampleText = importMode === 'markdown' ? markdownSampleText : qaSampleText
   const importVerb = importMode === 'markdown' ? '同步' : '导入'
+  const pageSubtitle = importMode === 'anki'
+    ? '导入 Anki APKG/COLPKG，尽量保留原模板 HTML、FrontSide、cloze 和媒体。'
+    : importMode === 'markdown'
+      ? '把 Markdown 标题同步成背诵卡，重复同步会更新原卡片。'
+      : '把 AI 整理好的问题答案导入到一个卡组。'
 
   return (
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
       <header className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-gray-950">批量导入</h1>
-          <p className="text-sm text-gray-500 mt-1">{importMode === 'markdown' ? '把 Markdown 标题同步成背诵卡，重复同步会更新原卡片。' : '把 AI 整理好的问题答案导入到一个卡组。'}</p>
+          <p className="text-sm text-gray-500 mt-1">{pageSubtitle}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => navigate('/decks')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">取消</button>
-          <button onClick={handleImport} className="h-10 px-5 rounded-xl bg-[#007aff] text-sm font-bold text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={parsedCards.length === 0}>
+          <button onClick={handleImport} className="h-10 px-5 rounded-xl bg-[#007aff] text-sm font-bold text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={parsedCards.length === 0 || isParsingFile}>
             {importVerb} {parsedCards.length} 张
           </button>
         </div>
@@ -2806,11 +2903,15 @@ constraint\t限制；约束条件`
               {[
                 { value: 'qa', label: '问答文本' },
                 { value: 'markdown', label: 'Markdown' },
+                { value: 'anki', label: 'Anki/APKG' },
               ].map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setImportMode(option.value)}
+                  onClick={() => {
+                    setImportMode(option.value)
+                    setMessage('')
+                  }}
                   className={`h-8 px-3 rounded-lg text-sm font-bold transition-colors ${importMode === option.value ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
                 >
                   {option.label}
@@ -2832,20 +2933,69 @@ constraint\t限制；约束条件`
             <label className="h-10 px-4 rounded-xl bg-gray-100 text-sm font-bold text-gray-700 hover:bg-gray-200 cursor-pointer flex items-center gap-2">
               <Upload size={16} />
               读取文件
-              <input type="file" accept=".txt,.md,.csv,.tsv,text/*,image/*,.pdf,.doc,.docx" onChange={handleFile} className="hidden" />
+              <input type="file" accept=".apkg,.colpkg,.txt,.md,.csv,.tsv,.html,.htm,text/*,image/*,.pdf,.doc,.docx" onChange={handleFile} className="hidden" />
             </label>
             {message && <span className="text-xs font-bold text-gray-400">{message}</span>}
           </div>
 
-          <textarea
-            value={rawText}
-            onChange={(event) => {
-              setRawText(event.target.value)
-              setMessage('')
-            }}
-            placeholder={sampleText}
-            className="min-h-[520px] w-full resize-none bg-white px-5 py-4 text-[15px] leading-7 text-gray-900 outline-none"
-          />
+          {importMode === 'anki' ? (
+            <div className="min-h-[520px] bg-white px-5 py-5">
+              {apkgImport ? (
+                <div className="grid gap-4">
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-4">
+                    <p className="text-sm font-black text-blue-900">Anki 包已就绪</p>
+                    <p className="mt-1 text-sm font-bold text-blue-700">
+                      原始笔记 {apkgImport.noteCount} 条，卡片 {apkgImport.cardCount} 张，可导入 {apkgImport.cards.length} 张。
+                    </p>
+                    {apkgImport.deckNames.length > 0 && (
+                      <p className="mt-2 text-xs font-bold text-blue-600">Anki 原卡组：{apkgImport.deckNames.slice(0, 6).join('、')}</p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: '媒体文件', value: apkgImport.mediaCount },
+                      { label: '模板引用', value: apkgImport.usedMediaCount },
+                      { label: '已可显示', value: apkgImport.resolvedMediaCount },
+                      { label: '提示', value: apkgImport.warnings.length },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-2xl bg-gray-50 px-4 py-3">
+                        <p className="text-2xl font-black text-gray-950">{item.value}</p>
+                        <p className="mt-1 text-xs font-bold text-gray-400">{item.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {apkgImport.warnings.length > 0 && (
+                    <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+                      <p className="mb-2 text-xs font-black text-amber-700">媒体提示</p>
+                      <div className="space-y-1">
+                        {apkgImport.warnings.slice(0, 6).map((warning) => (
+                          <p key={warning} className="text-xs font-bold text-amber-700">{warning}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="grid min-h-[480px] place-items-center rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-center">
+                  <div>
+                    <Upload size={30} className="mx-auto mb-3 text-gray-300" />
+                    <p className="text-sm font-black text-gray-700">{isParsingFile ? '正在解析 Anki 包...' : '选择 .apkg 或 .colpkg 文件'}</p>
+                    <p className="mt-2 max-w-md text-xs leading-6 text-gray-400">会读取 Anki 的模板 HTML、字段替换、FrontSide、cloze 和媒体引用。大媒体需要登录并配置 Storage Rules 才能上传。</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <textarea
+              value={rawText}
+              onChange={(event) => {
+                setRawText(event.target.value)
+                setMessage('')
+              }}
+              placeholder={sampleText}
+              className="min-h-[520px] w-full resize-none bg-white px-5 py-4 text-[15px] leading-7 text-gray-900 outline-none"
+            />
+          )}
         </section>
 
         <aside className="space-y-5">
@@ -2872,13 +3022,14 @@ constraint\t限制；约束条件`
             </div>
           </section>
 
-          <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-gray-100 flex items-center gap-2">
-              <Wand2 size={16} className="text-[#007aff]" />
-              <h2 className="text-sm font-black text-gray-950">给 AI 的提示词</h2>
-            </div>
-            <div className="p-5">
-              <pre className="whitespace-pre-wrap rounded-xl bg-gray-50 p-4 text-xs leading-6 text-gray-600">{importMode === 'markdown' ? `请把我的笔记整理成适合背诵的 Markdown。
+          {importMode !== 'anki' && (
+            <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-100 flex items-center gap-2">
+                <Wand2 size={16} className="text-[#007aff]" />
+                <h2 className="text-sm font-black text-gray-950">给 AI 的提示词</h2>
+              </div>
+              <div className="p-5">
+                <pre className="whitespace-pre-wrap rounded-xl bg-gray-50 p-4 text-xs leading-6 text-gray-600">{importMode === 'markdown' ? `请把我的笔记整理成适合背诵的 Markdown。
 用三级或四级标题写问题，标题下方写答案。
 如果一个标题下面是多级列表，并且适合拆成小卡，请在标题后加 #anki-list。
 可选：给稳定卡片加一行 <!-- YANG-ID: 唯一ID -->。
@@ -2889,8 +3040,9 @@ ${sampleText}` : `请从我上传的图片或文档中提取适合背诵的问�
 格式如下：
 
 ${sampleText}`}</pre>
-            </div>
-          </section>
+              </div>
+            </section>
+          )}
 
           <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
             <div className="h-11 px-5 border-b border-gray-100 flex items-center justify-between">
@@ -2903,10 +3055,18 @@ ${sampleText}`}</pre>
                 <div key={`${card.front}-${index}`} className="p-4 border-b border-gray-100">
                   <div className="mb-1 flex items-center gap-2">
                     <p className="text-sm font-black text-gray-950 line-clamp-2 flex-1">{card.front}</p>
-                    <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-400">{card.template === 'list' ? '列表' : card.sourceKey ? 'MD' : 'QA'}</span>
+                    <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-400">{card.template === 'anki' ? 'Anki' : card.template === 'list' ? '列表' : card.sourceKey ? 'MD' : 'QA'}</span>
                   </div>
-                  <p className="text-xs text-gray-500 line-clamp-2 mt-1">{card.back}</p>
+                  <div className="mt-1 line-clamp-3 text-xs text-gray-500">
+                    <CardContent
+                      card={card}
+                      side="back"
+                      className="text-xs text-gray-500 leading-relaxed"
+                      fallbackClassName="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap"
+                    />
+                  </div>
                   {card.source?.path && <p className="mt-2 text-[11px] font-bold text-gray-300 line-clamp-1">{card.source.path.join(' / ')}</p>}
+                  {card.source?.type === 'apkg' && <p className="mt-2 text-[11px] font-bold text-gray-300 line-clamp-1">{card.source.deckName} / {card.source.modelName} / {card.source.templateName}</p>}
                 </div>
               ))}
             </div>
@@ -2955,9 +3115,12 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
     return activeEditorFieldRef.current === 'front' ? 'front' : 'back'
   }
 
-  function handleSave() {
+  const handleSave = useCallback(() => {
+    const isHtmlTemplate = form.template === 'html'
     const front = form.front.trim()
     const back = form.back.trim()
+    const frontText = isHtmlTemplate ? htmlToPlainText(front) || 'HTML 正面' : front
+    const backText = isHtmlTemplate ? htmlToPlainText(back) || 'HTML 背面' : back
 
     if (!form.deckId) {
       setError('请先选择一个目录。')
@@ -2973,17 +3136,18 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
     }
 
     onCreateCard(form.deckId, {
-      front,
-      back,
+      front: frontText,
+      back: backText,
       template: form.template,
       tags: form.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
       favorite: form.favorite,
       flagged: form.flagged,
       comment: form.comment.trim(),
       align: form.align,
+      ...(isHtmlTemplate ? { frontHtml: front, backHtml: back } : {}),
     })
     navigate('/decks')
-  }
+  }, [form, navigate, onCreateCard])
 
   useEffect(() => {
     function handleShortcut(event) {
@@ -2995,11 +3159,20 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
 
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
-  }, [form])
+  }, [handleSave])
 
   const currentDeckCards = data.cards.filter((card) => card.deckId === form.deckId)
   const previewItems = [
-    { id: 'draft-card', front: form.front || '问题会显示在这里', back: form.back || '答案会显示在这里', align: form.align, isDraft: true },
+    {
+      id: 'draft-card',
+      front: form.template === 'html' ? htmlToPlainText(form.front) || '问题会显示在这里' : form.front || '问题会显示在这里',
+      back: form.template === 'html' ? htmlToPlainText(form.back) || '答案会显示在这里' : form.back || '答案会显示在这里',
+      frontHtml: form.template === 'html' ? form.front : '',
+      backHtml: form.template === 'html' ? form.back : '',
+      template: form.template,
+      align: form.align,
+      isDraft: true,
+    },
     ...currentDeckCards,
   ]
   const activePreview = previewItems[Math.min(previewIndex, previewItems.length - 1)] ?? previewItems[0]
@@ -3185,6 +3358,7 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
                   <option value="qa">问答题</option>
                   <option value="cloze">填空题</option>
                   <option value="note">摘录题</option>
+                  <option value="html">HTML</option>
                 </select>
               </label>
             </div>
@@ -3332,10 +3506,20 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
                 <span>{activePreview.isDraft ? '当前草稿' : '已有卡片预览'}</span>
                 <span>{previewIndex + 1}/{previewItems.length}</span>
               </div>
-              <h3 className={`text-2xl leading-relaxed font-black break-words ${activePreview.front ? 'text-gray-950' : 'text-gray-300'}`}>{previewFront}</h3>
+              <CardContent
+                card={activePreview}
+                side="front"
+                className={`text-2xl leading-relaxed font-black break-words ${activePreview.front ? 'text-gray-950' : 'text-gray-300'}`}
+                fallbackClassName={`text-2xl leading-relaxed font-black break-words whitespace-pre-wrap ${activePreview.front ? 'text-gray-950' : 'text-gray-300'}`}
+              />
               <div className="my-8 h-px bg-gray-200" />
               {previewRevealed ? (
-                <p className={`text-lg leading-relaxed break-words whitespace-pre-wrap ${activePreview.back ? 'text-gray-800' : 'text-gray-300'}`}>{previewBack}</p>
+                <CardContent
+                  card={activePreview}
+                  side="back"
+                  className={`text-lg leading-relaxed break-words ${activePreview.back ? 'text-gray-800' : 'text-gray-300'}`}
+                  fallbackClassName={`text-lg leading-relaxed break-words whitespace-pre-wrap ${activePreview.back ? 'text-gray-800' : 'text-gray-300'}`}
+                />
               ) : (
                 <p className="text-lg font-bold text-gray-300">答案已隐藏</p>
               )}
@@ -3703,14 +3887,24 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
                   <span key={tag} className="rounded-lg bg-gray-100 px-2 py-1 text-gray-500">{tag}</span>
                 ))}
               </div>
-              <h2 className="text-3xl font-black text-gray-950 leading-relaxed break-words">{activeCard.front}</h2>
+              <CardContent
+                card={activeCard}
+                side="front"
+                className="mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words"
+                fallbackClassName="mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words whitespace-pre-wrap"
+              />
 
               {!revealed ? (
                 <button type="button" onClick={() => setRevealed(true)} title="显示答案" className="mt-12 mx-auto h-11 w-[170px] rounded-xl bg-[#ff9f0a] text-white text-sm font-bold hover:bg-[#f59600]">显示答案</button>
               ) : (
                 <div className="mt-10 pt-8 border-t border-gray-200">
                   <p className="text-xs font-bold text-gray-400 mb-4">Back</p>
-                  <p className="text-xl text-gray-800 leading-relaxed break-words whitespace-pre-wrap">{activeCard.back}</p>
+                  <CardContent
+                    card={activeCard}
+                    side="back"
+                    className="mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words"
+                    fallbackClassName="mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words whitespace-pre-wrap"
+                  />
                   {activeCard.comment && <p className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-left text-sm leading-relaxed text-gray-500">{activeCard.comment}</p>}
                 </div>
               )}
@@ -3868,6 +4062,12 @@ export default function App() {
             flagged: Boolean(cardValue.flagged),
             comment: cardValue.comment ?? '',
             align: cardValue.align ?? 'left',
+            ...(cardValue.frontHtml ? { frontHtml: cardValue.frontHtml } : {}),
+            ...(cardValue.backHtml ? { backHtml: cardValue.backHtml } : {}),
+            ...(cardValue.cardCss ? { cardCss: cardValue.cardCss } : {}),
+            ...(cardValue.media ? { media: cardValue.media } : {}),
+            ...(cardValue.sourceKey ? { sourceKey: cardValue.sourceKey } : {}),
+            ...(cardValue.source ? { source: cardValue.source } : {}),
             createdAt: Date.now(),
             review: { dueDate: todayKey(), interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
           },
@@ -3898,6 +4098,10 @@ export default function App() {
             ...(card.flagged ? { flagged: card.flagged } : {}),
             ...(card.comment ? { comment: card.comment } : {}),
             ...(card.align ? { align: card.align } : {}),
+            ...(card.frontHtml ? { frontHtml: card.frontHtml } : {}),
+            ...(card.backHtml ? { backHtml: card.backHtml } : {}),
+            ...(card.cardCss ? { cardCss: card.cardCss } : {}),
+            ...(card.media ? { media: card.media } : {}),
             ...(card.sourceKey ? { sourceKey: card.sourceKey } : {}),
             ...(card.source ? { source: card.source } : {}),
           }
