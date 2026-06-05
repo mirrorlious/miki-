@@ -61,6 +61,7 @@ const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对
 const ACTIVITY_TICK_SECONDS = 10
 const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
+const BROWSE_CARD_RENDER_LIMIT = 300
 const STUDY_GRADE_OPTIONS = [
   {
     grade: 0,
@@ -417,28 +418,40 @@ function sanitizeCardHtml(html) {
   })
 }
 
+function isScriptCallText(value = '') {
+  return /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i.test(String(value ?? '').replace(/\s+/g, ' ').trim())
+}
+
 function CardContent({ card, side, className = '', fallbackClassName = '', placeholder = '' }) {
   const explicitHtml = getCardSideHtml(card, side)
   const text = getCardSideText(card, side) || placeholder
   const html = explicitHtml || (card?.template === 'html' && looksLikeHtml(text) ? text : '')
+  const fallbackText = isScriptCallText(text)
+    ? '这张 Anki 卡依赖脚本或加密模板，无法直接显示。请删除后用新版导入重新尝试。'
+    : text
 
   if (html) {
+    const safeHtml = sanitizeCardHtml(html)
+    const hasRenderableHtml = safeHtml.trim()
+      && (htmlToPlainText(safeHtml) || /<(?:img|audio|video|table|ul|ol|ruby|math|svg)\b/i.test(safeHtml))
     const scopeId = sanitizeCssScopeId(`${card?.id ?? 'preview'}-${side}`)
     const scopedCss = scopeAnkiCss(card?.cardCss, `[data-anki-card="${scopeId}"]`)
 
-    return (
-      <>
-        {scopedCss && <style>{scopedCss}</style>}
-        <div
-          data-anki-card={scopeId}
-          className={`anki-card-content ${className}`}
-          dangerouslySetInnerHTML={{ __html: sanitizeCardHtml(html) }}
-        />
-      </>
-    )
+    if (hasRenderableHtml) {
+      return (
+        <>
+          {scopedCss && <style>{scopedCss}</style>}
+          <div
+            data-anki-card={scopeId}
+            className={`anki-card-content ${className}`}
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
+          />
+        </>
+      )
+    }
   }
 
-  return <p className={fallbackClassName || className}>{text}</p>
+  return <p className={fallbackClassName || className}>{fallbackText}</p>
 }
 
 function toLocalDateKey(value = new Date()) {
@@ -465,23 +478,28 @@ function tokenizeForRelated(value) {
     for (let index = 0; index < token.length - 1; index += 1) parts.push(token.slice(index, index + 2))
     return parts
   })
-  return new Set([...asciiTokens, ...slicedChinese])
+  const stopTokens = new Set(['decryptfront', 'decryptback', 'decrypt', 'front', 'back'])
+  return new Set([...asciiTokens, ...slicedChinese].filter((token) => !stopTokens.has(token)))
 }
 
 function getRelatedSuggestions(data, card, limit = 4) {
   if (!card) return []
   const linkedIds = new Set(getCardLinks(card))
   const baseTokens = tokenizeForRelated(`${card.front} ${card.back}`)
+  if (baseTokens.size === 0 && !card.source?.path?.join('/')) return []
 
   return data.cards
     .filter((item) => item.id !== card.id && !linkedIds.has(item.id))
     .map((item) => {
       const itemTokens = tokenizeForRelated(`${item.front} ${item.back}`)
-      let score = item.deckId === card.deckId ? 2 : 0
+      let score = 0
       if (card.source?.path?.join('/') && item.source?.path?.join('/') === card.source.path.join('/')) score += 4
+      let overlap = 0
       for (const token of baseTokens) {
-        if (itemTokens.has(token)) score += 1
+        if (itemTokens.has(token)) overlap += 1
       }
+      score += overlap
+      if (overlap > 0 && item.deckId === card.deckId) score += 1
       return { card: item, score }
     })
     .filter((item) => item.score > 0)
@@ -2342,6 +2360,7 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
         return `${card.front} ${card.back}`.toLowerCase().includes(keyword)
       })
   ), [data.cards, query, selectedDeckId])
+  const visibleCardRows = useMemo(() => visibleCards.slice(0, BROWSE_CARD_RENDER_LIMIT), [visibleCards])
 
   const selectedCard = visibleCards.find((card) => card.id === selectedCardId) ?? visibleCards[0] ?? null
   const selectedDeck = data.decks.find((deck) => deck.id === selectedDeckId)
@@ -2439,7 +2458,7 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
                 </tr>
               </thead>
               <tbody>
-                {visibleCards.map((card) => (
+                {visibleCardRows.map((card) => (
                   <tr
                     key={card.id}
                     onClick={() => setSelectedCardId(card.id)}
@@ -2450,6 +2469,13 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
                     <td className="px-3 py-2 text-right text-xs text-gray-400 whitespace-nowrap">{card.review.dueDate}</td>
                   </tr>
                 ))}
+                {visibleCards.length > visibleCardRows.length && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-4 text-center text-xs font-bold text-gray-400">
+                      已显示前 {visibleCardRows.length} 张。继续输入关键词可以缩小范围。
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
             {visibleCards.length === 0 && <p className="text-sm text-gray-400 text-center py-10">没有匹配的卡片。</p>}

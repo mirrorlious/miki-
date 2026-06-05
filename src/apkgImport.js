@@ -3,6 +3,9 @@ import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 const FIELD_SEPARATOR = '\x1f'
+const MAX_SIDE_HTML_LENGTH = 24000
+const MAX_CARD_CSS_LENGTH = 6000
+const SCRIPT_CALL_PATTERN = /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i
 
 let sqlPromise = null
 
@@ -40,6 +43,17 @@ function normalizeTags(value = '') {
     .filter(Boolean)
 }
 
+function stripUnsafeTemplateParts(html = '') {
+  return String(html)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
+    .replace(/\[sound:[^\]]+\]/gi, '')
+}
+
+function normalizeText(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim()
+}
+
 function extractCollectionFile(zip) {
   const candidates = ['collection.anki21', 'collection.anki2', 'collection.anki21b']
   for (const name of candidates) {
@@ -60,12 +74,83 @@ function splitFields(note, model) {
 }
 
 function stripHtml(html = '') {
+  const safeHtml = stripUnsafeTemplateParts(html)
   if (typeof document === 'undefined') {
-    return String(html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    return normalizeText(safeHtml.replace(/<[^>]*>/g, ' '))
   }
   const element = document.createElement('div')
-  element.innerHTML = String(html)
-  return (element.textContent || element.innerText || '').replace(/\s+/g, ' ').trim()
+  element.innerHTML = safeHtml
+  return normalizeText(element.textContent || element.innerText || '')
+}
+
+function isScriptCallText(value = '') {
+  const text = normalizeText(stripHtml(value))
+  return !text || SCRIPT_CALL_PATTERN.test(text)
+}
+
+function scoreFieldForSide(name, value, side) {
+  const text = stripHtml(value)
+  if (isScriptCallText(text)) return -Infinity
+
+  const lowerName = String(name ?? '').toLowerCase()
+  let score = Math.min(text.length, 200) / 40
+  if (side === 'front' && /(front|question|prompt|term|word|q|正面|问题|题目|词)/i.test(lowerName)) score += 8
+  if (side === 'back' && /(back|answer|definition|explain|meaning|a|背面|答案|解释|释义|定义)/i.test(lowerName)) score += 8
+  if (/(hint|tag|tags|deck|extra|note|id|guid|media|audio|sound|image|图片|音频)/i.test(lowerName)) score -= 4
+  return score
+}
+
+function pickFieldText(fields, side, avoidText = '') {
+  const avoid = normalizeText(avoidText)
+  return Object.entries(fields)
+    .map(([name, value]) => ({
+      text: stripHtml(value),
+      score: scoreFieldForSide(name, value, side),
+    }))
+    .filter((item) => item.text && item.text !== avoid && item.score > -Infinity)
+    .sort((a, b) => b.score - a.score)[0]?.text ?? ''
+}
+
+function pickAnyFieldText(fields, avoidText = '') {
+  const avoid = normalizeText(avoidText)
+  return Object.values(fields)
+    .map((value) => stripHtml(value))
+    .find((text) => text && text !== avoid && !isScriptCallText(text)) ?? ''
+}
+
+function pickSideText({ renderedHtml, fields, note, side, avoidText = '' }) {
+  const renderedText = stripHtml(renderedHtml)
+  if (!isScriptCallText(renderedText)) return renderedText
+
+  const fieldText = pickFieldText(fields, side, avoidText)
+  if (fieldText) return fieldText
+
+  const anyFieldText = pickAnyFieldText(fields, avoidText)
+  if (anyFieldText) return anyFieldText
+
+  const sortFieldText = stripHtml(note.sfld)
+  if (sortFieldText && sortFieldText !== normalizeText(avoidText) && !isScriptCallText(sortFieldText)) return sortFieldText
+
+  return ''
+}
+
+function makeStoredSideHtml(renderedHtml, fallbackText) {
+  const safeHtml = stripUnsafeTemplateParts(renderedHtml).trim()
+  if (!safeHtml || safeHtml.length > MAX_SIDE_HTML_LENGTH) return ''
+
+  const text = stripHtml(safeHtml)
+  if (!text || isScriptCallText(text)) return ''
+  if (normalizeText(text) === normalizeText(fallbackText) && !/<(?:table|ul|ol|strong|em|b|i|ruby|rt|br)\b/i.test(safeHtml)) return ''
+
+  return safeHtml
+}
+
+function makeStoredCss(css = '') {
+  const safeCss = String(css)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/@import[^;]+;/gi, '')
+    .trim()
+  return safeCss.length <= MAX_CARD_CSS_LENGTH ? safeCss : ''
 }
 
 function processConditionals(template, fields) {
@@ -140,6 +225,8 @@ export async function parseApkgFile(file, options = {}) {
     const { decks, models, notesById, cards } = readAnkiData(db)
     const rawCards = []
     const deckNames = new Set()
+    let scriptFallbackCount = 0
+    let skippedCards = 0
 
     for (const card of cards) {
       const note = notesById.get(Number(card.nid))
@@ -160,14 +247,23 @@ export async function parseApkgFile(file, options = {}) {
         templateName,
         clozeIndex: Number(card.ord) + 1,
       }
-      const frontHtml = renderTemplate(template?.qfmt || '{{Front}}', context)
-      const backHtml = renderTemplate(template?.afmt || '{{Back}}', {
+      const renderedFrontHtml = renderTemplate(template?.qfmt || '{{Front}}', context)
+      const renderedBackHtml = renderTemplate(template?.afmt || '{{Back}}', {
         ...context,
-        frontSide: frontHtml,
+        frontSide: renderedFrontHtml,
         revealed: true,
       })
-      const frontText = stripHtml(frontHtml) || String(note.sfld ?? '').trim() || Object.values(fields).find(Boolean) || 'Anki 卡片'
-      const backText = stripHtml(backHtml) || Object.values(fields).filter(Boolean).slice(1).join('\n') || frontText
+      if (isScriptCallText(renderedFrontHtml) || isScriptCallText(renderedBackHtml)) scriptFallbackCount += 1
+
+      const frontText = pickSideText({ renderedHtml: renderedFrontHtml, fields, note, side: 'front' })
+      const backText = pickSideText({ renderedHtml: renderedBackHtml, fields, note, side: 'back', avoidText: frontText })
+      if (!frontText || !backText) {
+        skippedCards += 1
+        continue
+      }
+      const frontHtml = makeStoredSideHtml(renderedFrontHtml, frontText)
+      const backHtml = makeStoredSideHtml(renderedBackHtml, backText)
+      const cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
 
       deckNames.add(deckName)
 
@@ -177,7 +273,7 @@ export async function parseApkgFile(file, options = {}) {
         back: backText,
         frontHtml,
         backHtml,
-        cardCss: model?.css ?? '',
+        cardCss,
         template: 'anki',
         tags,
         sourceKey: `apkg:${note.id}:${card.id}:${card.ord}`,
@@ -201,7 +297,10 @@ export async function parseApkgFile(file, options = {}) {
       deckNames: Array.from(deckNames).sort((a, b) => a.localeCompare(b, 'zh-CN')),
       noteCount: notesById.size,
       cardCount: cards.length,
-      warnings: [],
+      warnings: [
+        scriptFallbackCount > 0 ? `检测到 ${scriptFallbackCount} 张卡依赖 Anki 脚本，已改用可读取的字段文本。` : '',
+        skippedCards > 0 ? `跳过 ${skippedCards} 张无法提取文本的脚本/加密卡。` : '',
+      ].filter(Boolean),
     }
   } finally {
     db.close()
