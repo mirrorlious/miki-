@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { auth, db, githubProvider, googleProvider, hasFirebaseConfig } from './lib/firebase'
 
+const USER_COLLECTIONS = ['decks', 'cards', 'dailyLogs', 'reviewLogs']
+const BATCH_LIMIT = 450
+
 function getAccountLabel(user) {
   if (!user) return '当前账号'
   return user.email || user.displayName || '当前账号'
@@ -47,8 +50,83 @@ function validateEmailPassword(email, password, { allowEmptyPassword = false } =
   return ''
 }
 
+function toMillis(value) {
+  if (!value) return 0
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (value instanceof Date) return value.getTime()
+  if (typeof value?.toMillis === 'function') return value.toMillis()
+  if (typeof value?.seconds === 'number') return value.seconds * 1000 + Math.floor((value.nanoseconds ?? 0) / 1000000)
+  return Number(value) || 0
+}
+
 function itemTime(item) {
-  return Number(item?.updatedAt ?? item?.createdAt ?? item?.reviewedAt ?? item?.startedAt ?? item?.redeemedAt ?? 0) || 0
+  return Math.max(
+    toMillis(item?.updatedAt),
+    toMillis(item?.createdAt),
+    toMillis(item?.reviewedAt),
+    toMillis(item?.startedAt),
+    toMillis(item?.redeemedAt),
+    toMillis(item?.deletedAt),
+  )
+}
+
+function normalizeFirestoreValue(value) {
+  if (Array.isArray(value)) return value.map(normalizeFirestoreValue)
+  if (value && typeof value === 'object') {
+    if (typeof value.toMillis === 'function' || typeof value.seconds === 'number') return toMillis(value)
+    return Object.entries(value).reduce((next, [key, fieldValue]) => {
+      next[key] = normalizeFirestoreValue(fieldValue)
+      return next
+    }, {})
+  }
+  return value
+}
+
+function sanitizeForFirestore(value) {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  if (Array.isArray(value)) return value.map(sanitizeForFirestore).filter((item) => item !== undefined)
+  if (typeof value === 'object') {
+    return Object.entries(value).reduce((next, [key, fieldValue]) => {
+      const cleanValue = sanitizeForFirestore(fieldValue)
+      if (cleanValue !== undefined) next[key] = cleanValue
+      return next
+    }, {})
+  }
+  return value
+}
+
+function stableStringify(value) {
+  return JSON.stringify(sanitizeForFirestore(value) ?? null)
+}
+
+function normalizeDataShape(data = {}) {
+  return {
+    ...data,
+    profile: data.profile && typeof data.profile === 'object' ? data.profile : {},
+    decks: Array.isArray(data.decks) ? data.decks : [],
+    cards: Array.isArray(data.cards) ? data.cards : [],
+    dailyLogs: Array.isArray(data.dailyLogs) ? data.dailyLogs : [],
+    reviewLogs: Array.isArray(data.reviewLogs) ? data.reviewLogs : [],
+    activity: data.activity && typeof data.activity === 'object' ? data.activity : {},
+  }
+}
+
+function mapBy(items = [], keyName = 'id') {
+  const map = new Map()
+  for (const item of items) {
+    const key = item?.[keyName]
+    if (key) map.set(String(key), item)
+  }
+  return map
+}
+
+function activeItems(items = []) {
+  return items.filter((item) => !item?.deletedAt)
+}
+
+function deletedKeys(items = [], keyName = 'id') {
+  return new Set(items.filter((item) => item?.deletedAt && item?.[keyName]).map((item) => String(item[keyName])))
 }
 
 function mergeById(localItems = [], remoteItems = []) {
@@ -132,32 +210,193 @@ function mergeActivity(localActivity = {}, remoteActivity = {}) {
 }
 
 function mergeMemorizerData(localData, remoteData) {
-  if (!remoteData?.decks || !remoteData?.cards) return localData
-  if (!localData?.decks || !localData?.cards) return remoteData
+  const local = normalizeDataShape(localData)
+  const remote = normalizeDataShape(remoteData)
 
   return {
-    ...remoteData,
-    ...localData,
-    profile: mergeProfile(localData.profile, remoteData.profile),
-    decks: mergeById(localData.decks, remoteData.decks),
-    cards: mergeById(localData.cards, remoteData.cards),
-    reviewLogs: mergeById(localData.reviewLogs, remoteData.reviewLogs).slice(0, 400),
-    dailyLogs: mergeDailyLogs(localData.dailyLogs, remoteData.dailyLogs),
-    activity: mergeActivity(localData.activity, remoteData.activity),
+    ...remote,
+    ...local,
+    profile: mergeProfile(local.profile, remote.profile),
+    decks: mergeById(local.decks, remote.decks),
+    cards: mergeById(local.cards, remote.cards),
+    reviewLogs: mergeById(local.reviewLogs, remote.reviewLogs).slice(0, 400),
+    dailyLogs: mergeDailyLogs(local.dailyLogs, remote.dailyLogs),
+    activity: mergeActivity(local.activity, remote.activity),
   }
+}
+
+function buildCloudData(parts, fallbackData = {}) {
+  const fallback = normalizeDataShape(fallbackData)
+  return {
+    ...fallback,
+    profile: parts.profile ?? fallback.profile,
+    decks: activeItems(parts.decks),
+    cards: activeItems(parts.cards),
+    dailyLogs: activeItems(parts.dailyLogs),
+    reviewLogs: activeItems(parts.reviewLogs),
+    activity: parts.activity ?? fallback.activity,
+  }
+}
+
+function mergeCloudIntoLocal(localData, parts) {
+  const local = normalizeDataShape(localData)
+  const prunedLocal = {
+    ...local,
+    decks: local.decks.filter((deck) => !deletedKeys(parts.decks).has(String(deck.id))),
+    cards: local.cards.filter((card) => !deletedKeys(parts.cards).has(String(card.id))),
+    dailyLogs: local.dailyLogs.filter((log) => !deletedKeys(parts.dailyLogs, 'date').has(String(log.date))),
+    reviewLogs: local.reviewLogs.filter((log) => !deletedKeys(parts.reviewLogs).has(String(log.id))),
+  }
+
+  return mergeMemorizerData(prunedLocal, buildCloudData(parts, local))
+}
+
+function makeActiveDocument(item, serverTimestamp) {
+  const clean = sanitizeForFirestore(item) ?? {}
+  return {
+    ...clean,
+    createdAt: clean.createdAt ?? serverTimestamp,
+    updatedAt: serverTimestamp,
+    deletedAt: null,
+  }
+}
+
+function makeDeletedDocument(keyName, key, serverTimestamp) {
+  return {
+    [keyName]: key,
+    updatedAt: serverTimestamp,
+    deletedAt: serverTimestamp,
+  }
+}
+
+function enqueueCollectionDiff(ops, fns, uid, collectionName, previousItems, nextItems, keyName = 'id') {
+  const previous = mapBy(previousItems, keyName)
+  const next = mapBy(nextItems, keyName)
+
+  for (const [key, item] of next.entries()) {
+    if (stableStringify(item) === stableStringify(previous.get(key))) continue
+    ops.push({
+      ref: fns.doc(db, 'users', uid, collectionName, key),
+      data: makeActiveDocument(item, fns.serverTimestamp()),
+    })
+  }
+
+  for (const key of previous.keys()) {
+    if (next.has(key)) continue
+    ops.push({
+      ref: fns.doc(db, 'users', uid, collectionName, key),
+      data: makeDeletedDocument(keyName, key, fns.serverTimestamp()),
+    })
+  }
+}
+
+async function commitOps(fns, ops) {
+  for (let index = 0; index < ops.length; index += BATCH_LIMIT) {
+    const batch = fns.writeBatch(db)
+    for (const op of ops.slice(index, index + BATCH_LIMIT)) {
+      batch.set(op.ref, op.data, { merge: true })
+    }
+    await batch.commit()
+  }
+}
+
+async function persistDataDiff(uid, previousData, nextData) {
+  const fns = await import('firebase/firestore')
+  const previous = normalizeDataShape(previousData)
+  const next = normalizeDataShape(nextData)
+  const ops = []
+
+  enqueueCollectionDiff(ops, fns, uid, 'decks', previous.decks, next.decks)
+  enqueueCollectionDiff(ops, fns, uid, 'cards', previous.cards, next.cards)
+  enqueueCollectionDiff(ops, fns, uid, 'dailyLogs', previous.dailyLogs, next.dailyLogs, 'date')
+  enqueueCollectionDiff(ops, fns, uid, 'reviewLogs', previous.reviewLogs, next.reviewLogs)
+
+  if (stableStringify(previous.profile) !== stableStringify(next.profile)) {
+    ops.push({
+      ref: fns.doc(db, 'users', uid, 'profile', 'main'),
+      data: makeActiveDocument(next.profile, fns.serverTimestamp()),
+    })
+  }
+
+  if (stableStringify(previous.activity) !== stableStringify(next.activity)) {
+    ops.push({
+      ref: fns.doc(db, 'users', uid, 'activity', 'main'),
+      data: makeActiveDocument(next.activity, fns.serverTimestamp()),
+    })
+  }
+
+  if (ops.length === 0) return false
+  await commitOps(fns, ops)
+  return true
+}
+
+async function hasModernData(uid, fns) {
+  for (const collectionName of USER_COLLECTIONS) {
+    const snap = await fns.getDocs(fns.query(fns.collection(db, 'users', uid, collectionName), fns.limit(1)))
+    if (!snap.empty) return true
+  }
+  const profileSnap = await fns.getDoc(fns.doc(db, 'users', uid, 'profile', 'main'))
+  if (profileSnap.exists()) return true
+  const activitySnap = await fns.getDoc(fns.doc(db, 'users', uid, 'activity', 'main'))
+  return activitySnap.exists()
+}
+
+async function migrateLegacyPayload(uid, user, fns) {
+  const stateRef = fns.doc(db, 'users', uid, 'migration', 'state')
+  const stateSnap = await fns.getDoc(stateRef)
+  if (stateSnap.exists() && stateSnap.data()?.payloadSplitCompleted) return
+
+  const alreadyModern = await hasModernData(uid, fns)
+  const legacySnap = await fns.getDoc(fns.doc(db, 'memorizerUsers', uid))
+  const payload = legacySnap.data()?.payload
+
+  if (!alreadyModern && payload?.decks && payload?.cards) {
+    await persistDataDiff(uid, normalizeDataShape({}), normalizeDataShape(payload))
+  }
+
+  await fns.setDoc(stateRef, {
+    payloadSplitCompleted: true,
+    source: alreadyModern ? 'modern-data-exists' : 'memorizerUsers-payload',
+    owner: {
+      uid,
+      email: user.email ?? null,
+      displayName: user.displayName ?? null,
+    },
+    updatedAt: fns.serverTimestamp(),
+  }, { merge: true })
+}
+
+function readCollectionSnapshot(snapshot) {
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...normalizeFirestoreValue(document.data()),
+  }))
 }
 
 export function useCloudSync(data, setData) {
   const [user, setUser] = useState(null)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
+  const [lastReadAt, setLastReadAt] = useState(null)
+  const [lastWriteAt, setLastWriteAt] = useState(null)
+  const [lastErrorAt, setLastErrorAt] = useState(null)
+  const [lastErrorMessage, setLastErrorMessage] = useState('')
   const [message, setMessage] = useState(hasFirebaseConfig ? '请登录账号，登录后手机和电脑会同步同一份数据。' : '还没配置 Firebase，所以当前只会保存在本机浏览器。')
   const [syncState, setSyncState] = useState(hasFirebaseConfig ? 'signed-out' : 'disabled')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
   const readyRef = useRef(false)
-  const lastSerializedRef = useRef('')
   const latestDataRef = useRef(data)
+  const lastPersistedDataRef = useRef(normalizeDataShape(data))
   const timerRef = useRef(null)
+  const activeUidRef = useRef(null)
+  const cloudPartsRef = useRef({
+    profile: null,
+    activity: null,
+    decks: [],
+    cards: [],
+    dailyLogs: [],
+    reviewLogs: [],
+  })
 
   useEffect(() => {
     latestDataRef.current = data
@@ -167,18 +406,27 @@ export function useCloudSync(data, setData) {
     if (!hasFirebaseConfig) return
     let alive = true
     let stopAuth = () => {}
-    let stopSnap = () => {}
+    let stopCloud = () => {}
 
     ;(async () => {
+      const fns = await import('firebase/firestore')
       const { onAuthStateChanged } = await import('firebase/auth')
-      const { doc, onSnapshot, setDoc, serverTimestamp } = await import('firebase/firestore')
 
-      stopAuth = onAuthStateChanged(auth, (nextUser) => {
+      stopAuth = onAuthStateChanged(auth, async (nextUser) => {
         if (!alive) return
         setUser(nextUser)
         setAuthError('')
         readyRef.current = false
-        stopSnap()
+        activeUidRef.current = nextUser?.uid ?? null
+        cloudPartsRef.current = {
+          profile: null,
+          activity: null,
+          decks: [],
+          cards: [],
+          dailyLogs: [],
+          reviewLogs: [],
+        }
+        stopCloud()
 
         if (!nextUser) {
           setMessage('已退出云同步，当前继续使用本地数据。')
@@ -188,97 +436,149 @@ export function useCloudSync(data, setData) {
 
         setMessage('正在连接云端数据...')
         setSyncState('connecting')
-        const ref = doc(db, 'memorizerUsers', nextUser.uid)
 
-        stopSnap = onSnapshot(ref, async (snap) => {
+        try {
+          await migrateLegacyPayload(nextUser.uid, nextUser, fns)
+        } catch (error) {
           if (!alive) return
-
-          try {
-            const payload = snap.data()?.payload
-            if (snap.exists() && payload?.decks && payload?.cards) {
-              const merged = mergeMemorizerData(latestDataRef.current, payload)
-              const mergedSerialized = JSON.stringify(merged)
-              const remoteSerialized = JSON.stringify(payload)
-              lastSerializedRef.current = mergedSerialized
-              readyRef.current = true
-              setData(merged)
-              setLastSyncedAt(Date.now())
-              setSyncState('synced')
-              setMessage(`云端数据已合并：${getAccountLabel(nextUser)}`)
-              if (mergedSerialized !== remoteSerialized) {
-                await setDoc(ref, {
-                  payload: merged,
-                  owner: {
-                    uid: nextUser.uid,
-                    email: nextUser.email ?? null,
-                    displayName: nextUser.displayName ?? null,
-                  },
-                  updatedAt: serverTimestamp(),
-                }, { merge: true })
-              }
-              return
-            }
-
-            const local = latestDataRef.current
-            lastSerializedRef.current = JSON.stringify(local)
-            await setDoc(ref, {
-              payload: local,
-              owner: {
-                uid: nextUser.uid,
-                email: nextUser.email ?? null,
-                displayName: nextUser.displayName ?? null,
-              },
-              updatedAt: serverTimestamp(),
-            }, { merge: true })
-            readyRef.current = true
-            setLastSyncedAt(Date.now())
-            setSyncState('synced')
-            setMessage('云端文档已初始化，后续会自动同步。')
-          } catch (error) {
-            setAuthError(mapAuthError(error))
-            setSyncState('error')
-            setMessage('云同步失败，请检查 Firebase 配置。')
-          }
-        }, (error) => {
-          setAuthError(mapAuthError(error))
+          const text = mapAuthError(error)
+          setAuthError(text)
+          setLastErrorAt(Date.now())
+          setLastErrorMessage(text)
           setSyncState('error')
-          setMessage('云同步连接失败，请检查 Firebase 配置。')
-        })
+          setMessage('旧数据迁移失败，请检查 Firestore 规则。')
+          return
+        }
+
+        const loaded = {
+          profile: false,
+          activity: false,
+          decks: false,
+          cards: false,
+          dailyLogs: false,
+          reviewLogs: false,
+        }
+        const unsubscribers = []
+
+        function allLoaded() {
+          return Object.values(loaded).every(Boolean)
+        }
+
+        async function applyCloudSnapshot(isInitial = false) {
+          const uid = activeUidRef.current
+          if (!alive || !uid) return
+
+          const cloudData = buildCloudData(cloudPartsRef.current, latestDataRef.current)
+          const merged = mergeCloudIntoLocal(latestDataRef.current, cloudPartsRef.current)
+
+          lastPersistedDataRef.current = cloudData
+          setLastReadAt(Date.now())
+          setLastSyncedAt(Date.now())
+          setSyncState('synced')
+          setMessage(`云端数据已读取：${getAccountLabel(nextUser)}`)
+
+          if (stableStringify(merged) !== stableStringify(latestDataRef.current)) {
+            setData(merged)
+          }
+
+          if (isInitial && stableStringify(merged) !== stableStringify(cloudData)) {
+            try {
+              const wrote = await persistDataDiff(uid, cloudData, merged)
+              if (wrote) {
+                lastPersistedDataRef.current = merged
+                setLastWriteAt(Date.now())
+                setLastSyncedAt(Date.now())
+                setMessage(`本地未上传的数据已补写到云端：${getAccountLabel(nextUser)}`)
+              }
+            } catch (error) {
+              const text = mapAuthError(error)
+              setAuthError(text)
+              setLastErrorAt(Date.now())
+              setLastErrorMessage(text)
+              setSyncState('error')
+              setMessage('补写本地数据失败。')
+            }
+          }
+        }
+
+        function markLoaded(name) {
+          loaded[name] = true
+          if (allLoaded() && !readyRef.current) {
+            readyRef.current = true
+            applyCloudSnapshot(true)
+          }
+        }
+
+        function handleSnapshotError(error) {
+          const text = mapAuthError(error)
+          setAuthError(text)
+          setLastErrorAt(Date.now())
+          setLastErrorMessage(text)
+          setSyncState('error')
+          setMessage('云同步连接失败，请检查 Firebase 配置或网络。')
+        }
+
+        unsubscribers.push(fns.onSnapshot(fns.doc(db, 'users', nextUser.uid, 'profile', 'main'), (snap) => {
+          cloudPartsRef.current.profile = snap.exists() ? normalizeFirestoreValue(snap.data()) : null
+          if (readyRef.current) applyCloudSnapshot()
+          markLoaded('profile')
+        }, handleSnapshotError))
+
+        unsubscribers.push(fns.onSnapshot(fns.doc(db, 'users', nextUser.uid, 'activity', 'main'), (snap) => {
+          cloudPartsRef.current.activity = snap.exists() ? normalizeFirestoreValue(snap.data()) : null
+          if (readyRef.current) applyCloudSnapshot()
+          markLoaded('activity')
+        }, handleSnapshotError))
+
+        for (const collectionName of USER_COLLECTIONS) {
+          unsubscribers.push(fns.onSnapshot(fns.collection(db, 'users', nextUser.uid, collectionName), (snap) => {
+            cloudPartsRef.current[collectionName] = readCollectionSnapshot(snap)
+            if (readyRef.current) applyCloudSnapshot()
+            markLoaded(collectionName)
+          }, handleSnapshotError))
+        }
+
+        stopCloud = () => {
+          unsubscribers.forEach((unsubscribe) => unsubscribe())
+        }
       })
     })()
 
     return () => {
       alive = false
-      stopSnap()
+      stopCloud()
       stopAuth()
     }
   }, [setData])
 
   useEffect(() => {
     if (!hasFirebaseConfig || !user || !readyRef.current) return
-    const serialized = JSON.stringify(data)
-    if (serialized === lastSerializedRef.current) return
+    const nextData = normalizeDataShape(data)
+    const previousData = lastPersistedDataRef.current
+    if (stableStringify(nextData) === stableStringify(previousData)) return
     if (timerRef.current) clearTimeout(timerRef.current)
     setSyncState('syncing')
+    setMessage('正在同步本机变动...')
 
     timerRef.current = setTimeout(async () => {
       try {
-        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
-        await setDoc(doc(db, 'memorizerUsers', user.uid), {
-          payload: data,
-          owner: {
-            uid: user.uid,
-            email: user.email ?? null,
-            displayName: user.displayName ?? null,
-          },
-          updatedAt: serverTimestamp(),
-        }, { merge: true })
-        lastSerializedRef.current = serialized
-        setLastSyncedAt(Date.now())
+        const wrote = await persistDataDiff(user.uid, previousData, nextData)
+        lastPersistedDataRef.current = nextData
+        const now = Date.now()
+        if (wrote) {
+          setLastWriteAt(now)
+          setLastSyncedAt(now)
+          setMessage(`已写入云端：${getAccountLabel(user)}`)
+        } else {
+          setLastSyncedAt(now)
+          setMessage(`云端数据已是最新：${getAccountLabel(user)}`)
+        }
         setSyncState('synced')
-        setMessage(`已同步到云端：${getAccountLabel(user)}`)
       } catch (error) {
-        setAuthError(mapAuthError(error))
+        const text = mapAuthError(error)
+        setAuthError(text)
+        setLastErrorAt(Date.now())
+        setLastErrorMessage(text)
         setSyncState('error')
         setMessage('这次同步没有成功。')
       }
@@ -381,35 +681,21 @@ export function useCloudSync(data, setData) {
     setMessage('正在手动同步云端数据...')
 
     try {
-      const { doc, getDoc, setDoc, serverTimestamp } = await import('firebase/firestore')
-      const ref = doc(db, 'memorizerUsers', user.uid)
-      const snap = await getDoc(ref)
-      const remotePayload = snap.data()?.payload
-      const localPayload = latestDataRef.current
-      const merged = snap.exists() && remotePayload?.decks && remotePayload?.cards
-        ? mergeMemorizerData(localPayload, remotePayload)
-        : localPayload
-      const serialized = JSON.stringify(merged)
-
-      await setDoc(ref, {
-        payload: merged,
-        owner: {
-          uid: user.uid,
-          email: user.email ?? null,
-          displayName: user.displayName ?? null,
-        },
-        updatedAt: serverTimestamp(),
-      }, { merge: true })
-
-      readyRef.current = true
-      lastSerializedRef.current = serialized
-      setData(merged)
-      setLastSyncedAt(Date.now())
+      const previousData = lastPersistedDataRef.current
+      const nextData = normalizeDataShape(latestDataRef.current)
+      const wrote = await persistDataDiff(user.uid, previousData, nextData)
+      lastPersistedDataRef.current = nextData
+      const now = Date.now()
+      setLastWriteAt(wrote ? now : lastWriteAt)
+      setLastSyncedAt(now)
       setSyncState('synced')
-      setMessage(`手动同步完成：${getAccountLabel(user)}`)
+      setMessage(wrote ? `手动同步完成：${getAccountLabel(user)}` : `云端数据已是最新：${getAccountLabel(user)}`)
       return true
     } catch (error) {
-      setAuthError(mapAuthError(error))
+      const text = mapAuthError(error)
+      setAuthError(text)
+      setLastErrorAt(Date.now())
+      setLastErrorMessage(text)
       setSyncState('error')
       setMessage('手动同步失败，请稍后再试。')
       return false
@@ -421,6 +707,10 @@ export function useCloudSync(data, setData) {
     user,
     accountLabel: getAccountLabel(user),
     lastSyncedAt,
+    lastReadAt,
+    lastWriteAt,
+    lastErrorAt,
+    lastErrorMessage,
     message,
     syncState,
     authBusy,

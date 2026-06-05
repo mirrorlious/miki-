@@ -806,6 +806,14 @@ function formatSyncTime(timestamp) {
   })
 }
 
+function formatCompactSyncTime(timestamp) {
+  if (!timestamp) return ''
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function ToolbarButton({ to, icon: Icon, label, disabled = false }) {
   const baseClass = 'h-9 px-3 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors'
 
@@ -1118,16 +1126,38 @@ function AuthDialog({ open, cloud, onClose }) {
 function Shell({ children, data, cloud, studyDeckId }) {
   const summary = stats(data)
   const firstDeckId = studyDeckId ?? data.decks[0]?.id
+  const latestSyncAt = cloud.lastWriteAt ?? cloud.lastReadAt ?? cloud.lastSyncedAt
   const syncLabel = !cloud.enabled
     ? '本地模式'
     : !cloud.user
       ? '待登录'
-      : ({
-        synced: '已同步',
-        syncing: '同步中',
-        connecting: '连接中',
-        error: '同步失败',
-      })[cloud.syncState] ?? '连接中'
+      : cloud.syncState === 'error'
+        ? '同步失败'
+        : cloud.syncState === 'syncing'
+          ? '写入中'
+          : cloud.syncState === 'connecting'
+            ? '连接中'
+            : cloud.lastWriteAt
+              ? `写入 ${formatCompactSyncTime(cloud.lastWriteAt)}`
+              : cloud.lastReadAt
+                ? `读取 ${formatCompactSyncTime(cloud.lastReadAt)}`
+                : '已连接'
+  const syncTitle = [
+    cloud.message,
+    cloud.lastWriteAt ? `上次写入：${formatSyncTime(cloud.lastWriteAt)}` : '',
+    cloud.lastReadAt ? `上次读取：${formatSyncTime(cloud.lastReadAt)}` : '',
+    cloud.lastErrorMessage ? `错误：${cloud.lastErrorMessage}` : '',
+  ].filter(Boolean).join('\n')
+  const syncIconClass = cloud.syncState === 'error'
+    ? 'text-red-500'
+    : cloud.user
+      ? 'text-[#34c759]'
+      : 'text-gray-300'
+  const syncPillClass = cloud.syncState === 'error'
+    ? 'bg-red-50 text-red-600 hover:bg-red-50'
+    : cloud.user
+      ? 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+      : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
   const rewardState = getRewardState(data)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
@@ -1145,14 +1175,7 @@ function Shell({ children, data, cloud, studyDeckId }) {
     setAuthDialogOpen(true)
   }
 
-  const actionButtonClass = 'inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-black shadow-sm transition-colors'
-  const disabledActionClass = `${actionButtonClass} cursor-not-allowed bg-gray-100 text-gray-300`
   const syncBusy = cloud.syncState === 'syncing' || cloud.syncState === 'connecting'
-  const syncClass = cloud.syncState === 'error'
-    ? 'bg-red-50 text-red-600'
-    : cloud.user
-      ? 'bg-white/75 text-gray-700 hover:bg-white'
-      : 'bg-white/60 text-gray-400'
 
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-gray-950 font-sans">
@@ -1183,64 +1206,50 @@ function Shell({ children, data, cloud, studyDeckId }) {
             ))}
           </nav>
 
-          <div className="hidden items-center gap-2 md:flex">
-            {firstDeckId ? (
-              <>
-                <Link to={`/cards/new/${firstDeckId}`} className={`${actionButtonClass} bg-white text-gray-700 hover:bg-gray-50`}>
-                  <Plus size={14} /> 添加
-                </Link>
-                <Link to="/import" className={`${actionButtonClass} bg-white text-gray-700 hover:bg-gray-50`}>
-                  <Upload size={14} /> 导入
-                </Link>
-                <Link to={`/study/${firstDeckId}`} className={`${actionButtonClass} bg-[#007aff] text-white hover:bg-[#006ee6]`}>
-                  <Brain size={14} /> 学习
-                </Link>
-              </>
-            ) : (
-              <>
-                <span className={disabledActionClass}><Plus size={14} /> 添加</span>
-                <span className={disabledActionClass}><Upload size={14} /> 导入</span>
-                <span className={disabledActionClass}><Brain size={14} /> 学习</span>
-              </>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3 text-xs text-gray-500">
-            <span className="hidden sm:inline-flex rounded-full bg-white/75 px-3 py-1.5 font-bold text-gray-700 shadow-sm">待复习 {summary.dueToday}</span>
+          <div className="flex min-w-0 items-center justify-end gap-2 text-xs text-gray-500">
+            <div className="flex min-w-0 items-center gap-1 rounded-2xl bg-white/85 px-1.5 py-1 shadow-sm ring-1 ring-white/80">
+              <span className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-700" title={`今日待复习 ${summary.dueToday} 张`}>
+                <Layers3 size={13} className="text-gray-400" />
+                <span className="hidden sm:inline">待复习</span>
+                <span>{summary.dueToday}</span>
+              </span>
             {cloud.enabled && cloud.user ? (
               <button
                 type="button"
                 onClick={cloud.onManualSync}
                 disabled={syncBusy}
-                title={cloud.message}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-black shadow-sm disabled:cursor-wait disabled:opacity-70 sm:px-3 ${syncClass}`}
+                title={syncTitle}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 ${syncPillClass}`}
               >
-                <Cloud size={14} className={cloud.syncState === 'error' ? 'text-red-500' : 'text-[#34c759]'} />
-                <span>{syncLabel}</span>
+                <Cloud size={14} className={syncIconClass} />
+                <span className="whitespace-nowrap">{syncLabel}</span>
               </button>
             ) : (
-              <span className={`inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-black shadow-sm sm:px-3 ${syncClass}`} title={cloud.message}>
-                {cloud.enabled ? <Cloud size={14} /> : <CloudOff size={14} />}
-                <span>{syncLabel}</span>
+              <span className={`inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black ${syncPillClass}`} title={syncTitle || cloud.message}>
+                {cloud.enabled ? <Cloud size={14} className={syncIconClass} /> : <CloudOff size={14} className={syncIconClass} />}
+                <span className="whitespace-nowrap">{syncLabel}</span>
               </span>
             )}
-            <Link to="/profile" className="hidden max-w-[190px] items-center gap-2 rounded-2xl bg-white/75 px-2 py-1.5 shadow-sm hover:bg-white sm:flex">
+            <Link to="/profile" className="flex min-w-0 items-center gap-2 rounded-xl px-1.5 py-1 transition-colors hover:bg-gray-50 md:px-2">
               <ProfileAvatar profile={profile} size="sm" />
-              <span className="min-w-0">
+              <span className="hidden min-w-0 md:block">
                 <span className="block truncate font-black text-gray-800">{profile.nickname}</span>
                 <span className="block text-[10px] font-bold text-gray-400">{rewardState.availablePoints} 可用点</span>
               </span>
             </Link>
             {cloud.enabled && !cloud.user && (
-              <button type="button" onClick={openAuthDialog} className="h-8 px-3 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50 flex items-center gap-1.5">
+              <button type="button" onClick={openAuthDialog} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-700 transition-colors hover:bg-gray-50">
                 <LogIn size={13} /> 登录
               </button>
             )}
             {cloud.enabled && cloud.user && (
-              <button type="button" onClick={cloud.onSignOut} className="h-8 px-3 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50 flex items-center gap-1.5">
-                <LogOut size={13} /> 退出
+              <button type="button" onClick={cloud.onSignOut} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900" title={`退出 ${cloud.accountLabel}`}>
+                <LogOut size={13} />
+                <span className="hidden xl:inline">退出</span>
               </button>
             )}
+            </div>
+            {latestSyncAt && <span className="sr-only">最近同步 {formatSyncTime(latestSyncAt)}</span>}
           </div>
         </div>
 
