@@ -328,6 +328,16 @@ function splitAnkiDeckPath(value = '') {
     .filter(Boolean)
 }
 
+function isAnkiMajorPathPart(value = '') {
+  return /^(?:[A-ZＡ-Ｚ]\s*)?(?:刑法学|民法学|法理学|宪法学|法制史|行政法|商经法|三国法|理论法|刑法|民法|宪法|法理|法条分析)/.test(normalizePathPart(value))
+}
+
+function findAnkiMajorPathIndex(sourcePath = []) {
+  const directIndex = sourcePath.findIndex(isAnkiMajorPathPart)
+  if (directIndex >= 0) return directIndex
+  return sourcePath.length >= 3 ? 1 : -1
+}
+
 function getAnkiDeckTarget(card, fallbackDeck) {
   const sourcePath = Array.isArray(card?.source?.deckPath) && card.source.deckPath.length > 0
     ? card.source.deckPath.map(normalizePathPart).filter(Boolean)
@@ -351,6 +361,18 @@ function getAnkiDeckTarget(card, fallbackDeck) {
     }
   }
 
+  const majorIndex = findAnkiMajorPathIndex(sourcePath)
+  if (majorIndex >= 0) {
+    const name = sourcePath[majorIndex]
+    const section = sourcePath[0] && sourcePath[0] !== name ? sourcePath[0] : 'Anki 导入'
+    return {
+      section,
+      chapter: '',
+      name,
+      description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入，按大科目 ${name} 归组。`,
+    }
+  }
+
   const name = sourcePath[sourcePath.length - 1]
   const section = sourcePath[0]
   const chapter = sourcePath.length > 2 ? sourcePath.slice(1, -1).join(' / ') : ''
@@ -361,6 +383,20 @@ function getAnkiDeckTarget(card, fallbackDeck) {
     name,
     description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入。`,
   }
+}
+
+function summarizeAnkiDeckTargets(deckSummaries = [], fallbackDeck = null) {
+  const targetMap = new Map()
+  for (const summary of deckSummaries) {
+    const target = getAnkiDeckTarget({ source: { deckName: summary.deckName, deckPath: summary.deckPath } }, fallbackDeck)
+    const key = getDeckIdentityKey(target)
+    const current = targetMap.get(key) ?? { ...target, count: 0, sourceCount: 0, samples: [] }
+    current.count += Number(summary.count) || 0
+    current.sourceCount += 1
+    if (current.samples.length < 3) current.samples.push(summary.deckPath?.join(' / ') || summary.deckName)
+    targetMap.set(key, current)
+  }
+  return Array.from(targetMap.values()).sort((a, b) => getDeckOptionLabel(a).localeCompare(getDeckOptionLabel(b), 'zh-CN'))
 }
 
 function getDeckIdentityKey(deck) {
@@ -2834,7 +2870,7 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
     importMode === 'markdown' ? parseMarkdownCards(rawText) : parseBulkCards(rawText)
   ), [importMode, rawText])
   const parsedCards = importMode === 'anki' ? (apkgImport?.cards ?? []) : parsedTextCards
-  const ankiDeckSummaries = apkgImport?.deckSummaries ?? []
+  const ankiDeckSummaries = useMemo(() => apkgImport?.deckSummaries ?? [], [apkgImport])
 
   useEffect(() => {
     if (!data.decks.find((deck) => deck.id === selectedDeckId)) {
@@ -2882,8 +2918,10 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
         const result = await parseApkgFile(file, {
           importId,
         })
+        const fallbackDeck = data.decks.find((deck) => deck.id === selectedDeckId) ?? data.decks[0] ?? null
+        const targetCount = summarizeAnkiDeckTargets(result.deckSummaries ?? [], fallbackDeck).length || 1
         setApkgImport(result)
-        setMessage(`已解析 ${result.cards.length} 张 Anki 卡，将按 ${result.deckSummaries?.length || 1} 个原章节分组。图片、音频会跳过。`)
+        setMessage(`已解析 ${result.cards.length} 张 Anki 卡，将按 ${targetCount} 个大科目分组。图片、音频会跳过。`)
       } catch (error) {
         setMessage(error?.message || 'Anki 包解析失败。')
       } finally {
@@ -2905,6 +2943,7 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
   }
 
   const selectedDeck = data.decks.find((deck) => deck.id === selectedDeckId)
+  const ankiTargetSummaries = useMemo(() => summarizeAnkiDeckTargets(ankiDeckSummaries, selectedDeck), [ankiDeckSummaries, selectedDeck])
   const qaSampleText = `Q: 辛亥革命爆发于哪一年？
 A: 1911 年。
 
@@ -2925,7 +2964,7 @@ constraint\t限制；约束条件`
   const sampleText = importMode === 'markdown' ? markdownSampleText : qaSampleText
   const importVerb = importMode === 'markdown' ? '同步' : '导入'
   const pageSubtitle = importMode === 'anki'
-    ? '导入 Anki APKG/COLPKG，按原始牌组章节自动分组，并保留可安全显示的静态 HTML。'
+    ? '导入 Anki APKG/COLPKG，按 A 刑法学、B 民法学这类大科目自动分组，并保留可安全显示的静态 HTML。'
     : importMode === 'markdown'
       ? '把 Markdown 标题同步成背诵卡，重复同步会更新原卡片。'
       : '把 AI 整理好的问题答案导入到一个卡组。'
@@ -2996,8 +3035,8 @@ constraint\t限制；约束条件`
                     <p className="mt-1 text-sm font-bold text-blue-700">
                       原始笔记 {apkgImport.noteCount} 条，卡片 {apkgImport.cardCount} 张，可导入 {apkgImport.cards.length} 张。
                     </p>
-                    {ankiDeckSummaries.length > 0 && (
-                      <p className="mt-2 text-xs font-bold text-blue-600">将按 Anki 原章节导入到 {ankiDeckSummaries.length} 个卡组。</p>
+                    {ankiTargetSummaries.length > 0 && (
+                      <p className="mt-2 text-xs font-bold text-blue-600">将按 Anki 大科目导入到 {ankiTargetSummaries.length} 个卡组。</p>
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -3005,7 +3044,7 @@ constraint\t限制；约束条件`
                       { label: '原始笔记', value: apkgImport.noteCount },
                       { label: '原始卡片', value: apkgImport.cardCount },
                       { label: '可导入', value: apkgImport.cards.length },
-                      { label: '章节卡组', value: ankiDeckSummaries.length || 1 },
+                      { label: '大科目', value: ankiTargetSummaries.length || 1 },
                     ].map((item) => (
                       <div key={item.label} className="rounded-2xl bg-gray-50 px-4 py-3">
                         <p className="text-2xl font-black text-gray-950">{item.value}</p>
@@ -3023,18 +3062,18 @@ constraint\t限制；约束条件`
                       </div>
                     </div>
                   )}
-                  {ankiDeckSummaries.length > 0 && (
+                  {ankiTargetSummaries.length > 0 && (
                     <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
-                      <p className="mb-2 text-xs font-black text-gray-400">自动识别的章节</p>
+                      <p className="mb-2 text-xs font-black text-gray-400">自动识别的大科目</p>
                       <div className="grid gap-1.5">
-                        {ankiDeckSummaries.slice(0, 10).map((summary) => (
-                          <div key={summary.deckName} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2">
-                            <span className="min-w-0 truncate text-xs font-bold text-gray-700">{summary.deckPath?.join(' / ') || summary.deckName}</span>
+                        {ankiTargetSummaries.slice(0, 10).map((summary) => (
+                          <div key={getDeckIdentityKey(summary)} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2">
+                            <span className="min-w-0 truncate text-xs font-bold text-gray-700">{getDeckOptionLabel(summary)}</span>
                             <span className="shrink-0 text-xs font-black text-gray-400">{summary.count}</span>
                           </div>
                         ))}
-                        {ankiDeckSummaries.length > 10 && (
-                          <p className="px-1 text-[11px] font-bold text-gray-300">还有 {ankiDeckSummaries.length - 10} 个章节会一并导入。</p>
+                        {ankiTargetSummaries.length > 10 && (
+                          <p className="px-1 text-[11px] font-bold text-gray-300">还有 {ankiTargetSummaries.length - 10} 个大科目会一并导入。</p>
                         )}
                       </div>
                     </div>
@@ -3075,7 +3114,7 @@ constraint\t限制；约束条件`
               <h2 className="text-lg font-black text-gray-950">{importMode === 'anki' ? '按 Anki 章节导入' : (selectedDeck?.name ?? '未选择')}</h2>
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">
                 {importMode === 'anki'
-                  ? `会按 APKG 内部的 :: 章节路径创建或复用卡组；没有路径的卡片才会落入 ${selectedDeck?.name ?? '兜底卡组'}。`
+                  ? `会按 APKG 内部的 :: 路径自动归到 A 刑法学、B 民法学这类大科目；没有路径的卡片才会落入 ${selectedDeck?.name ?? '兜底卡组'}。`
                   : (selectedDeck?.description ?? '先创建一个卡组。')}
               </p>
             </div>
@@ -3085,8 +3124,8 @@ constraint\t限制；约束条件`
                 <p className="text-3xl font-black text-gray-950">{parsedCards.length}</p>
               </div>
               <div className="p-5">
-                <p className="text-xs font-bold text-gray-400 mb-1">{importMode === 'anki' ? '章节' : '现有'}</p>
-                <p className="text-3xl font-black text-gray-950">{importMode === 'anki' ? (ankiDeckSummaries.length || 1) : data.cards.filter((card) => card.deckId === selectedDeckId).length}</p>
+                <p className="text-xs font-bold text-gray-400 mb-1">{importMode === 'anki' ? '大科目' : '现有'}</p>
+                <p className="text-3xl font-black text-gray-950">{importMode === 'anki' ? (ankiTargetSummaries.length || 1) : data.cards.filter((card) => card.deckId === selectedDeckId).length}</p>
               </div>
             </div>
           </section>

@@ -3,8 +3,8 @@ import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 const FIELD_SEPARATOR = '\x1f'
-const MAX_SIDE_HTML_LENGTH = 24000
-const MAX_CARD_CSS_LENGTH = 6000
+const MAX_SIDE_HTML_LENGTH = 120000
+const MAX_CARD_CSS_LENGTH = 20000
 const SCRIPT_CALL_PATTERN = /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i
 
 let sqlPromise = null
@@ -47,6 +47,10 @@ function stripUnsafeTemplateParts(html = '') {
   return String(html)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
+    .replace(/<audio\b[^>]*>[\s\S]*?<\/audio>/gi, '')
+    .replace(/<video\b[^>]*>[\s\S]*?<\/video>/gi, '')
+    .replace(/<source\b[^>]*>/gi, '')
+    .replace(/<img\b[^>]*>/gi, '')
     .replace(/\[sound:[^\]]+\]/gi, '')
 }
 
@@ -95,27 +99,58 @@ function isScriptCallText(value = '') {
   return !text || SCRIPT_CALL_PATTERN.test(text)
 }
 
+function removeKnownPrefixText(text = '', prefix = '') {
+  const cleanText = normalizeText(text)
+  const cleanPrefix = normalizeText(prefix)
+  if (!cleanText || !cleanPrefix) return cleanText
+  if (cleanText === cleanPrefix) return ''
+  if (cleanText.startsWith(cleanPrefix)) return normalizeText(cleanText.slice(cleanPrefix.length))
+  return cleanText
+}
+
+function looksLikeRichHtml(value = '') {
+  return /<(?:table|ul|ol|strong|em|b|i|ruby|rt|br|div|span|p|section|article|h[1-6]|style)\b/i.test(String(value))
+    || /\s(?:class|style)=/i.test(String(value))
+}
+
 function scoreFieldForSide(name, value, side) {
   const text = stripHtml(value)
   if (isScriptCallText(text)) return -Infinity
 
   const lowerName = String(name ?? '').toLowerCase()
   let score = Math.min(text.length, 200) / 40
+  if (side === 'front' && /(题干|题目|问题|正面|原文|考点|front|question|prompt|stem)/i.test(lowerName)) score += 12
+  if (side === 'back' && /(答案|解析|背面|反面|详解|说明|解释|answer|back|explain|analysis|solution)/i.test(lowerName)) score += 12
   if (side === 'front' && /(front|question|prompt|term|word|q|正面|问题|题目|词)/i.test(lowerName)) score += 8
   if (side === 'back' && /(back|answer|definition|explain|meaning|a|背面|答案|解释|释义|定义)/i.test(lowerName)) score += 8
   if (/(hint|tag|tags|deck|extra|note|id|guid|media|audio|sound|image|图片|音频)/i.test(lowerName)) score -= 4
   return score
 }
 
-function pickFieldText(fields, side, avoidText = '') {
+function pickFieldCandidate(fields, side, avoidText = '') {
   const avoid = normalizeText(avoidText)
   return Object.entries(fields)
-    .map(([name, value]) => ({
-      text: stripHtml(value),
-      score: scoreFieldForSide(name, value, side),
-    }))
+    .map(([name, value]) => {
+      const text = removeKnownPrefixText(stripHtml(value), avoid)
+      return {
+        name,
+        raw: String(value ?? ''),
+        text,
+        score: scoreFieldForSide(name, value, side),
+      }
+    })
     .filter((item) => item.text && item.text !== avoid && item.score > -Infinity)
-    .sort((a, b) => b.score - a.score)[0]?.text ?? ''
+    .sort((a, b) => b.score - a.score)[0] ?? null
+}
+
+function pickFieldText(fields, side, avoidText = '') {
+  return pickFieldCandidate(fields, side, avoidText)?.text ?? ''
+}
+
+function pickFieldHtml(fields, side, avoidText = '') {
+  const candidate = pickFieldCandidate(fields, side, avoidText)
+  if (!candidate || !looksLikeRichHtml(candidate.raw)) return ''
+  return candidate.raw
 }
 
 function pickAnyFieldText(fields, avoidText = '') {
@@ -127,7 +162,10 @@ function pickAnyFieldText(fields, avoidText = '') {
 
 function pickSideText({ renderedHtml, fields, note, side, avoidText = '' }) {
   const renderedText = stripHtml(renderedHtml)
-  if (!isScriptCallText(renderedText)) return renderedText
+  if (!isScriptCallText(renderedText)) {
+    const cleanRenderedText = removeKnownPrefixText(renderedText, avoidText)
+    if (cleanRenderedText) return cleanRenderedText
+  }
 
   const fieldText = pickFieldText(fields, side, avoidText)
   if (fieldText) return fieldText
@@ -147,11 +185,17 @@ function makeStoredSideHtml(renderedHtml, fallbackText) {
 
   const text = stripHtml(safeHtml)
   if (!text || isScriptCallText(text)) return ''
-  const hasRichMarkup = /<(?:table|ul|ol|strong|em|b|i|ruby|rt|br|div|span|p|section|article|h[1-6])\b/i.test(safeHtml)
-    || /\s(?:class|style)=/i.test(safeHtml)
+  const hasRichMarkup = looksLikeRichHtml(safeHtml)
   if (normalizeText(text) === normalizeText(fallbackText) && !hasRichMarkup) return ''
 
   return safeHtml
+}
+
+function pickSideHtml({ renderedHtml, fields, side, fallbackText }) {
+  const renderedSideHtml = makeStoredSideHtml(renderedHtml, fallbackText)
+  if (renderedSideHtml) return renderedSideHtml
+
+  return makeStoredSideHtml(pickFieldHtml(fields, side, fallbackText), fallbackText)
 }
 
 function makeStoredCss(css = '') {
@@ -196,10 +240,12 @@ function renderTemplate(template, context) {
   html = html.replace(/{{Deck}}/g, deckName)
   html = html.replace(/{{Card}}/g, templateName)
   html = html.replace(/{{cloze:([^}]+)}}/g, (_, rawName) => renderCloze(fields[rawName.trim()] ?? '', clozeIndex, revealed))
-  html = html.replace(/{{(?:text:|type:)?([^}]+)}}/g, (_, rawName) => {
+  html = html.replace(/{{([^}]+)}}/g, (_, rawName) => {
     const name = rawName.trim()
     if (name.startsWith('#') || name.startsWith('/') || name.startsWith('^')) return ''
-    return fields[name] ?? ''
+    if (/^tts\b/i.test(name)) return ''
+    const fieldName = name.includes(':') ? name.split(':').pop().trim() : name
+    return fields[fieldName] ?? ''
   })
 
   return html.trim()
@@ -264,16 +310,22 @@ export async function parseApkgFile(file, options = {}) {
         frontSide: renderedFrontHtml,
         revealed: true,
       })
-      if (isScriptCallText(renderedFrontHtml) || isScriptCallText(renderedBackHtml)) scriptFallbackCount += 1
+      const renderedBackAnswerHtml = renderTemplate(template?.afmt || '{{Back}}', {
+        ...context,
+        frontSide: '',
+        revealed: true,
+      })
+      const answerHtml = renderedBackAnswerHtml || renderedBackHtml
+      if (isScriptCallText(renderedFrontHtml) || isScriptCallText(answerHtml)) scriptFallbackCount += 1
 
       const frontText = pickSideText({ renderedHtml: renderedFrontHtml, fields, note, side: 'front' })
-      const backText = pickSideText({ renderedHtml: renderedBackHtml, fields, note, side: 'back', avoidText: frontText })
+      const backText = pickSideText({ renderedHtml: answerHtml, fields, note, side: 'back', avoidText: frontText })
       if (!frontText || !backText) {
         skippedCards += 1
         continue
       }
-      const frontHtml = makeStoredSideHtml(renderedFrontHtml, frontText)
-      const backHtml = makeStoredSideHtml(renderedBackHtml, backText)
+      const frontHtml = pickSideHtml({ renderedHtml: renderedFrontHtml, fields, side: 'front', fallbackText: frontText })
+      const backHtml = pickSideHtml({ renderedHtml: answerHtml, fields, side: 'back', fallbackText: backText })
       const cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
 
       deckNames.add(deckName)
