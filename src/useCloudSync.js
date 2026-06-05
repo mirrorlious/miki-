@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { auth, db, githubProvider, googleProvider, hasFirebaseConfig } from './lib/firebase'
 
 const USER_COLLECTIONS = ['decks', 'cards', 'dailyLogs', 'reviewLogs']
+const COLLECTION_KEY_NAMES = {
+  decks: 'id',
+  cards: 'id',
+  dailyLogs: 'date',
+  reviewLogs: 'id',
+}
 const BATCH_LIMIT = 450
 
 function getAccountLabel(user) {
@@ -131,6 +137,58 @@ function activeItems(items = []) {
 
 function deletedKeys(items = [], keyName = 'id') {
   return new Set(items.filter((item) => item?.deletedAt && item?.[keyName]).map((item) => String(item[keyName])))
+}
+
+function activeKeys(items = [], keyName = 'id') {
+  return new Set(activeItems(items).map((item) => item?.[keyName]).filter(Boolean).map(String))
+}
+
+function createPendingDeletedState() {
+  return {
+    decks: new Set(),
+    cards: new Set(),
+    dailyLogs: new Set(),
+    reviewLogs: new Set(),
+  }
+}
+
+function rememberPendingDeletedKeys(pendingDeleted, previousData, nextData) {
+  const previous = normalizeDataShape(previousData)
+  const next = normalizeDataShape(nextData)
+
+  for (const collectionName of USER_COLLECTIONS) {
+    const keyName = COLLECTION_KEY_NAMES[collectionName] ?? 'id'
+    const previousKeys = activeKeys(previous[collectionName], keyName)
+    const nextKeys = activeKeys(next[collectionName], keyName)
+    const pending = pendingDeleted[collectionName]
+
+    for (const key of nextKeys) pending.delete(key)
+    for (const key of previousKeys) {
+      if (!nextKeys.has(key)) pending.add(key)
+    }
+  }
+}
+
+function applyPendingDeletedKeys(parts, pendingDeleted) {
+  const nextParts = { ...parts }
+  const now = Date.now()
+
+  for (const collectionName of USER_COLLECTIONS) {
+    const keyName = COLLECTION_KEY_NAMES[collectionName] ?? 'id'
+    const pending = pendingDeleted[collectionName]
+    const items = Array.isArray(parts[collectionName]) ? parts[collectionName] : []
+    if (!pending?.size) {
+      nextParts[collectionName] = items
+      continue
+    }
+
+    nextParts[collectionName] = [
+      ...items.filter((item) => !pending.has(String(item?.[keyName]))),
+      ...Array.from(pending).map((key) => makeDeletedDocument(keyName, key, now)),
+    ]
+  }
+
+  return nextParts
 }
 
 function mergeById(localItems = [], remoteItems = []) {
@@ -402,6 +460,7 @@ export function useCloudSync(data, setData) {
   const lastPersistedDataRef = useRef(normalizeDataShape(data))
   const timerRef = useRef(null)
   const activeUidRef = useRef(null)
+  const pendingDeletedRef = useRef(createPendingDeletedState())
   const cloudPartsRef = useRef({
     profile: null,
     activity: null,
@@ -431,6 +490,7 @@ export function useCloudSync(data, setData) {
         setAuthError('')
         readyRef.current = false
         activeUidRef.current = nextUser?.uid ?? null
+        pendingDeletedRef.current = createPendingDeletedState()
         cloudPartsRef.current = {
           profile: null,
           activity: null,
@@ -481,8 +541,9 @@ export function useCloudSync(data, setData) {
           const uid = activeUidRef.current
           if (!alive || !uid) return
 
-          const cloudData = buildCloudData(cloudPartsRef.current, normalizeDataShape({}))
-          const merged = mergeCloudIntoLocal(latestDataRef.current, cloudPartsRef.current)
+          const cloudParts = applyPendingDeletedKeys(cloudPartsRef.current, pendingDeletedRef.current)
+          const cloudData = buildCloudData(cloudParts, normalizeDataShape({}))
+          const merged = mergeCloudIntoLocal(latestDataRef.current, cloudParts)
 
           lastPersistedDataRef.current = cloudData
           setLastReadAt(Date.now())
@@ -569,6 +630,7 @@ export function useCloudSync(data, setData) {
     const nextData = normalizeDataShape(data)
     const previousData = lastPersistedDataRef.current
     if (stableStringify(nextData) === stableStringify(previousData)) return
+    rememberPendingDeletedKeys(pendingDeletedRef.current, previousData, nextData)
     if (timerRef.current) clearTimeout(timerRef.current)
     setSyncState('syncing')
     setMessage('正在同步本机变动...')
@@ -696,6 +758,7 @@ export function useCloudSync(data, setData) {
     try {
       const previousData = lastPersistedDataRef.current
       const nextData = normalizeDataShape(latestDataRef.current)
+      rememberPendingDeletedKeys(pendingDeletedRef.current, previousData, nextData)
       const wrote = await persistDataDiff(user.uid, previousData, nextData)
       lastPersistedDataRef.current = nextData
       const now = Date.now()

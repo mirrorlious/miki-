@@ -317,6 +317,64 @@ function getDeckOptionLabel(deck) {
   return `${getDeckPath(deck)} / ${deck.name}`
 }
 
+function normalizePathPart(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim()
+}
+
+function splitAnkiDeckPath(value = '') {
+  return String(value)
+    .split('::')
+    .map((part) => normalizePathPart(part))
+    .filter(Boolean)
+}
+
+function getAnkiDeckTarget(card, fallbackDeck) {
+  const sourcePath = Array.isArray(card?.source?.deckPath) && card.source.deckPath.length > 0
+    ? card.source.deckPath.map(normalizePathPart).filter(Boolean)
+    : splitAnkiDeckPath(card?.source?.deckName)
+
+  if (sourcePath.length === 0) {
+    return {
+      section: fallbackDeck?.section ?? '',
+      chapter: fallbackDeck?.chapter ?? '',
+      name: fallbackDeck?.name ?? 'Anki 导入',
+      description: fallbackDeck?.description ?? '从 Anki 导入的卡片。',
+    }
+  }
+
+  if (sourcePath.length === 1) {
+    return {
+      section: 'Anki 导入',
+      chapter: '',
+      name: sourcePath[0],
+      description: `从 Anki 原卡组 ${sourcePath[0]} 导入。`,
+    }
+  }
+
+  const name = sourcePath[sourcePath.length - 1]
+  const section = sourcePath[0]
+  const chapter = sourcePath.length > 2 ? sourcePath.slice(1, -1).join(' / ') : ''
+
+  return {
+    section,
+    chapter,
+    name,
+    description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入。`,
+  }
+}
+
+function getDeckIdentityKey(deck) {
+  return [deck?.section ?? '', deck?.chapter ?? '', deck?.name ?? '']
+    .map((part) => normalizePathPart(part).toLowerCase())
+    .join('|||')
+}
+
+function getStableDeckColor(value = '') {
+  const colors = DECK_COLOR_OPTIONS.map((option) => option.value)
+  const hash = Array.from(String(value)).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return colors[hash % colors.length] ?? 'sun'
+}
+
 function getSectionNames(decks) {
   const customSections = decks
     .map(getDeckSection)
@@ -2776,6 +2834,7 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
     importMode === 'markdown' ? parseMarkdownCards(rawText) : parseBulkCards(rawText)
   ), [importMode, rawText])
   const parsedCards = importMode === 'anki' ? (apkgImport?.cards ?? []) : parsedTextCards
+  const ankiDeckSummaries = apkgImport?.deckSummaries ?? []
 
   useEffect(() => {
     if (!data.decks.find((deck) => deck.id === selectedDeckId)) {
@@ -2784,7 +2843,7 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
   }, [data.decks, selectedDeckId])
 
   function handleImport() {
-    if (!selectedDeckId) {
+    if (!selectedDeckId && importMode !== 'anki') {
       setMessage('请先选择一个卡组。')
       return
     }
@@ -2793,7 +2852,7 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
       return
     }
 
-    onCreateCards(selectedDeckId, parsedCards)
+    onCreateCards(selectedDeckId, parsedCards, { autoAnkiDecks: importMode === 'anki' })
     navigate('/browse', { state: { deckId: selectedDeckId } })
   }
 
@@ -2824,7 +2883,7 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
           importId,
         })
         setApkgImport(result)
-        setMessage(`已解析 ${result.cards.length} 张 Anki 卡。图片、音频等媒体文件会跳过，不会上传。`)
+        setMessage(`已解析 ${result.cards.length} 张 Anki 卡，将按 ${result.deckSummaries?.length || 1} 个原章节分组。图片、音频会跳过。`)
       } catch (error) {
         setMessage(error?.message || 'Anki 包解析失败。')
       } finally {
@@ -2866,7 +2925,7 @@ constraint\t限制；约束条件`
   const sampleText = importMode === 'markdown' ? markdownSampleText : qaSampleText
   const importVerb = importMode === 'markdown' ? '同步' : '导入'
   const pageSubtitle = importMode === 'anki'
-    ? '导入 Anki APKG/COLPKG，尽量保留原模板 HTML、FrontSide、cloze 和媒体。'
+    ? '导入 Anki APKG/COLPKG，按原始牌组章节自动分组，并保留可安全显示的静态 HTML。'
     : importMode === 'markdown'
       ? '把 Markdown 标题同步成背诵卡，重复同步会更新原卡片。'
       : '把 AI 整理好的问题答案导入到一个卡组。'
@@ -2910,7 +2969,7 @@ constraint\t限制；约束条件`
             </div>
 
             <label className="flex items-center gap-2 text-sm font-bold text-gray-800">
-              卡组
+              {importMode === 'anki' ? '兜底卡组' : '卡组'}
               <select
                 value={selectedDeckId}
                 onChange={(event) => setSelectedDeckId(event.target.value)}
@@ -2937,8 +2996,8 @@ constraint\t限制；约束条件`
                     <p className="mt-1 text-sm font-bold text-blue-700">
                       原始笔记 {apkgImport.noteCount} 条，卡片 {apkgImport.cardCount} 张，可导入 {apkgImport.cards.length} 张。
                     </p>
-                    {apkgImport.deckNames.length > 0 && (
-                      <p className="mt-2 text-xs font-bold text-blue-600">Anki 原卡组：{apkgImport.deckNames.slice(0, 6).join('、')}</p>
+                    {ankiDeckSummaries.length > 0 && (
+                      <p className="mt-2 text-xs font-bold text-blue-600">将按 Anki 原章节导入到 {ankiDeckSummaries.length} 个卡组。</p>
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -2946,7 +3005,7 @@ constraint\t限制；约束条件`
                       { label: '原始笔记', value: apkgImport.noteCount },
                       { label: '原始卡片', value: apkgImport.cardCount },
                       { label: '可导入', value: apkgImport.cards.length },
-                      { label: '提示', value: apkgImport.warnings.length },
+                      { label: '章节卡组', value: ankiDeckSummaries.length || 1 },
                     ].map((item) => (
                       <div key={item.label} className="rounded-2xl bg-gray-50 px-4 py-3">
                         <p className="text-2xl font-black text-gray-950">{item.value}</p>
@@ -2961,6 +3020,22 @@ constraint\t限制；约束条件`
                         {apkgImport.warnings.slice(0, 6).map((warning) => (
                           <p key={warning} className="text-xs font-bold text-amber-700">{warning}</p>
                         ))}
+                      </div>
+                    </div>
+                  )}
+                  {ankiDeckSummaries.length > 0 && (
+                    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
+                      <p className="mb-2 text-xs font-black text-gray-400">自动识别的章节</p>
+                      <div className="grid gap-1.5">
+                        {ankiDeckSummaries.slice(0, 10).map((summary) => (
+                          <div key={summary.deckName} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2">
+                            <span className="min-w-0 truncate text-xs font-bold text-gray-700">{summary.deckPath?.join(' / ') || summary.deckName}</span>
+                            <span className="shrink-0 text-xs font-black text-gray-400">{summary.count}</span>
+                          </div>
+                        ))}
+                        {ankiDeckSummaries.length > 10 && (
+                          <p className="px-1 text-[11px] font-bold text-gray-300">还有 {ankiDeckSummaries.length - 10} 个章节会一并导入。</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2991,14 +3066,18 @@ constraint\t限制；约束条件`
         <aside className="space-y-5">
           <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
             <div className="p-5 border-b border-gray-100">
-              <p className="text-xs font-black text-gray-400 mb-2">目标卡组</p>
+              <p className="text-xs font-black text-gray-400 mb-2">{importMode === 'anki' ? '自动分组' : '目标卡组'}</p>
               {selectedDeck && (
                 <span className="mb-2 inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-[11px] font-black text-gray-500">
                   <FolderOpen size={12} /> {getDeckPath(selectedDeck)}
                 </span>
               )}
-              <h2 className="text-lg font-black text-gray-950">{selectedDeck?.name ?? '未选择'}</h2>
-              <p className="text-sm text-gray-500 mt-2 leading-relaxed">{selectedDeck?.description ?? '先创建一个卡组。'}</p>
+              <h2 className="text-lg font-black text-gray-950">{importMode === 'anki' ? '按 Anki 章节导入' : (selectedDeck?.name ?? '未选择')}</h2>
+              <p className="text-sm text-gray-500 mt-2 leading-relaxed">
+                {importMode === 'anki'
+                  ? `会按 APKG 内部的 :: 章节路径创建或复用卡组；没有路径的卡片才会落入 ${selectedDeck?.name ?? '兜底卡组'}。`
+                  : (selectedDeck?.description ?? '先创建一个卡组。')}
+              </p>
             </div>
             <div className="grid grid-cols-2 divide-x divide-gray-100">
               <div className="p-5">
@@ -3006,8 +3085,8 @@ constraint\t限制；约束条件`
                 <p className="text-3xl font-black text-gray-950">{parsedCards.length}</p>
               </div>
               <div className="p-5">
-                <p className="text-xs font-bold text-gray-400 mb-1">现有</p>
-                <p className="text-3xl font-black text-gray-950">{data.cards.filter((card) => card.deckId === selectedDeckId).length}</p>
+                <p className="text-xs font-bold text-gray-400 mb-1">{importMode === 'anki' ? '章节' : '现有'}</p>
+                <p className="text-3xl font-black text-gray-950">{importMode === 'anki' ? (ankiDeckSummaries.length || 1) : data.cards.filter((card) => card.deckId === selectedDeckId).length}</p>
               </div>
             </div>
           </section>
@@ -4066,19 +4145,45 @@ export default function App() {
     })
   }
 
-  function createCards(deckId, cardValues) {
+  function createCards(deckId, cardValues, options = {}) {
     startTransition(() => {
       setData((current) => {
         const createdAt = Date.now()
+        const fallbackDeck = current.decks.find((deck) => deck.id === deckId) ?? current.decks[0] ?? null
+        const autoAnkiDecks = Boolean(options.autoAnkiDecks)
+        const deckByKey = new Map(current.decks.map((deck) => [getDeckIdentityKey(deck), deck]))
+        const createdDecks = []
+        const resolveDeckIdForCard = (card) => {
+          if (!autoAnkiDecks || card?.source?.type !== 'apkg') return deckId
+
+          const target = getAnkiDeckTarget(card, fallbackDeck)
+          const key = getDeckIdentityKey(target)
+          const existingDeck = deckByKey.get(key)
+          if (existingDeck) return existingDeck.id
+
+          const nextDeck = {
+            id: `deck-${createdAt}-anki-${createdDecks.length}`,
+            name: target.name,
+            description: target.description,
+            section: target.section,
+            chapter: target.chapter,
+            color: getStableDeckColor(key),
+            createdAt: createdAt + createdDecks.length,
+          }
+          deckByKey.set(key, nextDeck)
+          createdDecks.push(nextDeck)
+          return nextDeck.id
+        }
         const syncedCards = new Map(
           current.cards
-            .filter((card) => card.deckId === deckId && card.sourceKey)
+            .filter((card) => (autoAnkiDecks || card.deckId === deckId) && card.sourceKey)
             .map((card) => [card.sourceKey, card]),
         )
         const updatedSourceKeys = new Set()
         const cards = cardValues.map((card, index) => {
+          const targetDeckId = resolveDeckIdForCard(card)
           const importedCard = {
-            deckId,
+            deckId: targetDeckId,
             front: card.front,
             back: card.back,
             template: card.template ?? 'qa',
@@ -4111,10 +4216,11 @@ export default function App() {
             review: { dueDate: todayKey(), interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
           }
         })
-        const untouchedCards = current.cards.filter((card) => !(card.deckId === deckId && updatedSourceKeys.has(card.sourceKey)))
+        const untouchedCards = current.cards.filter((card) => !((autoAnkiDecks || card.deckId === deckId) && updatedSourceKeys.has(card.sourceKey)))
 
         return {
           ...current,
+          decks: createdDecks.length > 0 ? [...current.decks, ...createdDecks] : current.decks,
           cards: [...cards, ...untouchedCards],
         }
       })

@@ -54,6 +54,13 @@ function normalizeText(value = '') {
   return String(value).replace(/\s+/g, ' ').trim()
 }
 
+function splitAnkiDeckPath(deckName = '') {
+  return String(deckName)
+    .split('::')
+    .map((part) => normalizeText(part))
+    .filter(Boolean)
+}
+
 function extractCollectionFile(zip) {
   const candidates = ['collection.anki21', 'collection.anki2', 'collection.anki21b']
   for (const name of candidates) {
@@ -140,7 +147,9 @@ function makeStoredSideHtml(renderedHtml, fallbackText) {
 
   const text = stripHtml(safeHtml)
   if (!text || isScriptCallText(text)) return ''
-  if (normalizeText(text) === normalizeText(fallbackText) && !/<(?:table|ul|ol|strong|em|b|i|ruby|rt|br)\b/i.test(safeHtml)) return ''
+  const hasRichMarkup = /<(?:table|ul|ol|strong|em|b|i|ruby|rt|br|div|span|p|section|article|h[1-6])\b/i.test(safeHtml)
+    || /\s(?:class|style)=/i.test(safeHtml)
+  if (normalizeText(text) === normalizeText(fallbackText) && !hasRichMarkup) return ''
 
   return safeHtml
 }
@@ -225,6 +234,7 @@ export async function parseApkgFile(file, options = {}) {
     const { decks, models, notesById, cards } = readAnkiData(db)
     const rawCards = []
     const deckNames = new Set()
+    const deckSummaries = new Map()
     let scriptFallbackCount = 0
     let skippedCards = 0
 
@@ -236,6 +246,7 @@ export async function parseApkgFile(file, options = {}) {
       const template = model?.tmpls?.[Number(card.ord)] ?? model?.tmpls?.[0] ?? null
       const deck = decks[String(card.did)]
       const deckName = deck?.name ?? 'Anki 导入'
+      const deckPath = splitAnkiDeckPath(deckName)
       const modelName = model?.name ?? 'Anki 模板'
       const templateName = template?.name ?? `模板 ${Number(card.ord) + 1}`
       const fields = splitFields(note, model)
@@ -266,6 +277,10 @@ export async function parseApkgFile(file, options = {}) {
       const cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
 
       deckNames.add(deckName)
+      const deckSummaryKey = deckPath.join('::') || deckName
+      const deckSummary = deckSummaries.get(deckSummaryKey) ?? { deckName, deckPath, count: 0 }
+      deckSummary.count += 1
+      deckSummaries.set(deckSummaryKey, deckSummary)
 
       rawCards.push({
         id: `anki-${card.id}`,
@@ -285,6 +300,7 @@ export async function parseApkgFile(file, options = {}) {
           ankiCardId: String(card.id),
           ankiDeckId: String(card.did),
           deckName,
+          deckPath,
           modelName,
           templateName,
         },
@@ -295,6 +311,7 @@ export async function parseApkgFile(file, options = {}) {
       importId,
       cards: rawCards.filter((card) => card.front && card.back),
       deckNames: Array.from(deckNames).sort((a, b) => a.localeCompare(b, 'zh-CN')),
+      deckSummaries: Array.from(deckSummaries.values()).sort((a, b) => a.deckName.localeCompare(b.deckName, 'zh-CN')),
       noteCount: notesById.size,
       cardCount: cards.length,
       warnings: [
