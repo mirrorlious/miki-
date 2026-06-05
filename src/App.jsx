@@ -2241,7 +2241,7 @@ A: 依一方意思表示即可使法律关系发生、变更或消灭。`}
   )
 }
 
-function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDailyLog, onCreateDailyCards, studyDeckId, cloud }) {
+function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteSection, onSaveDailyLog, onCreateDailyCards, studyDeckId, cloud }) {
   const navigate = useNavigate()
   const [selectedDeckId, setSelectedDeckId] = useState(data.decks[0]?.id ?? null)
   const [selectedSection, setSelectedSection] = useState('全部')
@@ -2304,12 +2304,28 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDai
   const emptyDeckListText = selectedSection === '全部'
     ? '还没有卡组。'
     : `${selectedSection} 还没有卡组，可以先开一个章节或专题。`
+  const selectedSectionSummary = useMemo(() => {
+    if (selectedSection === '全部') return { deckCount: 0, cardCount: 0 }
+    const sectionDecks = deckRows.filter((deck) => getDeckSection(deck) === selectedSection)
+    return {
+      deckCount: sectionDecks.length,
+      cardCount: sectionDecks.reduce((sum, deck) => sum + deck.total, 0),
+    }
+  }, [deckRows, selectedSection])
 
   function handleDelete(deck) {
     const count = data.cards.filter((card) => card.deckId === deck.id).length
     const confirmed = window.confirm(`确定删除卡组“${deck.name}”吗？该卡组下的 ${count} 张卡片也会一起删除。`)
     if (!confirmed) return
     onDeleteDeck(deck.id)
+  }
+
+  function handleDeleteSelectedSection() {
+    if (selectedSection === '全部' || selectedSectionSummary.deckCount === 0) return
+    const confirmed = window.confirm(`确定删除板块“${selectedSection}”吗？该板块下的 ${selectedSectionSummary.deckCount} 个卡组和 ${selectedSectionSummary.cardCount} 张卡片会一起删除。`)
+    if (!confirmed) return
+    onDeleteSection(selectedSection)
+    setSelectedSection('全部')
   }
 
   function openCreateDeckForCurrentSection() {
@@ -2377,6 +2393,17 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDai
             <h2 className="text-sm font-black text-gray-950">{selectedSection === '全部' ? '牌组列表' : `${selectedSection}牌组`}</h2>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-gray-400">{visibleDeckRows.length} 个</span>
+              {selectedSection !== '全部' && visibleDeckRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDeleteSelectedSection}
+                  className="inline-flex h-7 items-center gap-1 rounded-lg bg-red-50 px-2 text-[11px] font-black text-red-600 hover:bg-red-100"
+                  title={`删除 ${selectedSection} 板块`}
+                >
+                  <Trash2 size={12} />
+                  删除板块
+                </button>
+              )}
               <CollapseToggle expanded={isPanelExpanded('deckList')} onToggle={() => toggleDeckPanel('deckList')} label="牌组列表" />
             </div>
           </div>
@@ -4225,6 +4252,32 @@ export default function App() {
     })
   }
 
+  function deleteSection(sectionName) {
+    startTransition(() => {
+      setData((current) => {
+        const deletedDeckIds = new Set(
+          current.decks
+            .filter((deck) => getDeckSection(deck) === sectionName)
+            .map((deck) => deck.id),
+        )
+        if (deletedDeckIds.size === 0) return current
+
+        const deletedCardIds = new Set(
+          current.cards
+            .filter((card) => deletedDeckIds.has(card.deckId))
+            .map((card) => card.id),
+        )
+
+        return {
+          ...current,
+          decks: current.decks.filter((deck) => !deletedDeckIds.has(deck.id)),
+          cards: current.cards.filter((card) => !deletedDeckIds.has(card.deckId)),
+          reviewLogs: current.reviewLogs.filter((log) => !deletedCardIds.has(log.cardId)),
+        }
+      })
+    })
+  }
+
   function createCard(deckId, cardValue = {}) {
     startTransition(() => {
       setData((current) => ({
@@ -4497,7 +4550,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home data={data} cloud={cloud} />} />
         <Route path="/app" element={<Dashboard data={data} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/decks" element={<Decks data={data} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/decks" element={<Decks data={data} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/browse" element={<Browse data={data} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} />} />
         <Route path="/organize" element={<Organize data={data} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/import" element={<ImportCards data={data} onCreateCards={createCards} studyDeckId={studyDeckId} cloud={cloud} />} />
