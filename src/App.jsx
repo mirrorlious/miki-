@@ -548,6 +548,38 @@ function CardContent({ card, side, className = '', fallbackClassName = '', place
   return <p className={fallbackClassName || className}>{fallbackText}</p>
 }
 
+function hasStoredCardHtml(card) {
+  return Boolean(card?.frontHtml || card?.backHtml || card?.cardCss)
+}
+
+function getReviewDueTime(review) {
+  if (review?.dueAt) {
+    const dueAt = new Date(review.dueAt).getTime()
+    if (Number.isFinite(dueAt)) return dueAt
+  }
+  if (review?.dueDate) {
+    const dueDate = new Date(`${review.dueDate}T00:00:00`).getTime()
+    if (Number.isFinite(dueDate)) return dueDate
+  }
+  return 0
+}
+
+function isReviewDue(review) {
+  return getReviewDueTime(review) <= Date.now()
+}
+
+function formatReviewDueLabel(review) {
+  const dueAt = getReviewDueTime(review)
+  if (!dueAt) return '现在'
+  const diffMs = dueAt - Date.now()
+  if (diffMs <= 0) return '现在'
+  const minutes = Math.max(1, Math.round(diffMs / 60000))
+  if (minutes < 60) return `${minutes}分钟后`
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)}小时后`
+  const days = Math.ceil(minutes / (24 * 60))
+  return `${days}天后`
+}
+
 function makeLocalCacheData(data) {
   return {
     ...data,
@@ -3724,8 +3756,8 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
     if (!deck) return []
     return data.cards
       .filter((card) => card.deckId === deck.id)
-      .sort((a, b) => (a.review?.dueDate ?? today).localeCompare(b.review?.dueDate ?? today))
-  }, [data.cards, deck, today])
+      .sort((a, b) => getReviewDueTime(a.review) - getReviewDueTime(b.review))
+  }, [data.cards, deck])
 
   const drillDeckOptions = useMemo(() => sortDecksByPath(data.decks).map((item) => ({
     id: item.id,
@@ -3799,10 +3831,12 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
     return drillCards[Math.floor(drillSeed * drillCards.length) % drillCards.length]
   }, [drillCards, drillSeed])
 
-  const queue = studyCards.filter((card) => (card.review?.dueDate ?? today) <= today)
+  const queue = studyCards.filter((card) => isReviewDue(card.review))
   const dueCard = queue[0] ?? null
   const activeCard = studyMode === 'drill' ? drillCard : dueCard ?? drillCard
-  const activeReview = activeCard?.review ?? { dueDate: today, interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null }
+  const activeReview = useMemo(() => (
+    activeCard?.review ?? { dueDate: today, interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null }
+  ), [activeCard?.review, today])
   const activeDeckPath = deck ? getDeckPath(deck) : ''
   const activeCardDeck = activeCard ? deckById.get(activeCard.deckId) : null
   const activeCardDeckLabel = activeCardDeck ? getDeckOptionLabel(activeCardDeck) : activeDeckPath
@@ -3814,6 +3848,11 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
   const progressPercent = sessionTotal > 0 ? Math.min(100, Math.round((session.reviewed / sessionTotal) * 100)) : 0
   const activeIsDrill = Boolean(activeCard && (studyMode === 'drill' || !dueCard))
   const lastGrade = STUDY_GRADE_OPTIONS.find((option) => option.grade === activeReview.lastGrade)
+  const activeCardHasHtml = hasStoredCardHtml(activeCard)
+  const gradeOptionsWithDue = useMemo(() => STUDY_GRADE_OPTIONS.map((option) => ({
+    ...option,
+    dueLabel: formatReviewDueLabel(scheduleReview(activeReview, option.grade)),
+  })), [activeReview])
 
   useEffect(() => {
     setRevealed(false)
@@ -3919,12 +3958,12 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
         </section>
 
         <section className="mb-4 rounded-2xl bg-white/90 border border-white shadow-sm p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+          <div className="flex flex-col gap-3">
+            <div className="min-w-0">
               <h2 className="text-sm font-black text-gray-950">抽背卡片</h2>
               <p className="mt-1 text-xs font-bold text-gray-400">不等到期也能复习，评分后同样会写入记忆曲线。</p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex rounded-xl bg-gray-100 p-1 text-xs font-black">
                 <button
                   type="button"
@@ -3946,7 +3985,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
               <select
                 value={drillScope}
                 onChange={(event) => updateDrillScope(event.target.value)}
-                className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-none focus:border-blue-400"
+                className="h-9 w-[120px] rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-none focus:border-blue-400"
               >
                 <option value="all">全库随机</option>
                 <option value="chapter">指定章节</option>
@@ -3960,7 +3999,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
                     setDrillTargetChapterKey(event.target.value)
                     drawDrillCard()
                   }}
-                  className="h-9 min-w-[180px] rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-none focus:border-blue-400"
+                  className="h-9 min-w-0 flex-1 basis-[260px] rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-none focus:border-blue-400"
                 >
                   {drillChapterOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label} · {option.count}</option>
@@ -3975,7 +4014,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
                     setDrillTargetDeckId(event.target.value)
                     drawDrillCard()
                   }}
-                  className="h-9 min-w-[180px] rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-none focus:border-blue-400"
+                  className="h-9 min-w-0 flex-1 basis-[260px] rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 outline-none focus:border-blue-400"
                 >
                   {drillDeckOptions.map((option) => (
                     <option key={option.id} value={option.id}>{option.label} · {option.count}</option>
@@ -3986,7 +4025,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
               <button
                 type="button"
                 onClick={drawDrillCard}
-                className="h-9 rounded-xl bg-gray-900 px-4 text-xs font-black text-white hover:bg-gray-800 disabled:bg-gray-300"
+                className="h-9 shrink-0 rounded-xl bg-gray-900 px-4 text-xs font-black text-white hover:bg-gray-800 disabled:bg-gray-300"
                 disabled={drillCards.length === 0}
               >
                 抽一张
@@ -4010,7 +4049,10 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
         {activeCard && (
           <motion.div key={activeCard.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl bg-white/90 border border-white shadow-sm mb-4 min-h-[460px] flex flex-col text-center overflow-hidden">
             <div className="h-10 border-b border-gray-200 px-4 flex items-center justify-between gap-3 text-xs text-gray-400">
-              <span>{activeIsDrill ? 'Drill' : 'Front'}</span>
+              <span className="flex items-center gap-2">
+                {activeIsDrill ? 'Drill' : 'Front'}
+                {activeCardHasHtml && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-600">HTML</span>}
+              </span>
               <span className="truncate text-right">{activeCardDeckLabel} · 到期 {activeReview.dueDate}</span>
             </div>
 
@@ -4050,7 +4092,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
 
         {revealed && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {STUDY_GRADE_OPTIONS.map((option) => (
+            {gradeOptionsWithDue.map((option) => (
               <button
                 key={option.grade}
                 type="button"
@@ -4060,7 +4102,8 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
               >
                 <span className="block text-base">{option.label}</span>
                 <span className="mt-1 block text-xs opacity-75">{option.detail}</span>
-                <span className="mt-2 block text-[11px] opacity-60">{option.result} · {session.grades[option.grade] ?? 0}</span>
+                <span className="mt-2 block text-[11px] opacity-80">下次：{option.dueLabel}</span>
+                <span className="mt-1 block text-[11px] opacity-60">本轮 {session.grades[option.grade] ?? 0}</span>
               </button>
             ))}
           </div>
