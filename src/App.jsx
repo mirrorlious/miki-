@@ -628,6 +628,36 @@ function getTodayFocusCount(data) {
   return getActivity(data).focusLog.filter((item) => item.startedAt && toLocalDateKey(item.startedAt) === today).length
 }
 
+function getFocusSummary(data, mode, now = new Date()) {
+  const activity = getActivity(data)
+  const today = new Date(now)
+  const start = new Date(today)
+
+  if (mode === 'month') {
+    start.setDate(1)
+  } else {
+    const day = (start.getDay() + 6) % 7
+    start.setDate(start.getDate() - day)
+  }
+  start.setHours(0, 0, 0, 0)
+
+  const end = new Date(today)
+  end.setHours(23, 59, 59, 999)
+
+  const focusItems = activity.focusLog.filter((item) => {
+    const startedAt = Number(item.startedAt)
+    return startedAt >= start.getTime() && startedAt <= end.getTime()
+  })
+  const activeDays = new Set(focusItems.map((item) => toLocalDateKey(item.startedAt)))
+
+  return {
+    label: mode === 'month' ? '本月' : '本周',
+    count: focusItems.length,
+    days: activeDays.size,
+    total: activity.focusSessions,
+  }
+}
+
 function addActivitySeconds(current, seconds, activeDeckId = null) {
   const activity = getActivity(current)
   const today = todayKey()
@@ -1117,6 +1147,12 @@ function Shell({ children, data, cloud, studyDeckId }) {
 
   const actionButtonClass = 'inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-black shadow-sm transition-colors'
   const disabledActionClass = `${actionButtonClass} cursor-not-allowed bg-gray-100 text-gray-300`
+  const syncBusy = cloud.syncState === 'syncing' || cloud.syncState === 'connecting'
+  const syncClass = cloud.syncState === 'error'
+    ? 'bg-red-50 text-red-600'
+    : cloud.user
+      ? 'bg-white/75 text-gray-700 hover:bg-white'
+      : 'bg-white/60 text-gray-400'
 
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-gray-950 font-sans">
@@ -1171,10 +1207,23 @@ function Shell({ children, data, cloud, studyDeckId }) {
 
           <div className="flex items-center gap-3 text-xs text-gray-500">
             <span className="hidden sm:inline-flex rounded-full bg-white/75 px-3 py-1.5 font-bold text-gray-700 shadow-sm">待复习 {summary.dueToday}</span>
-            <span className="hidden lg:flex items-center gap-1.5" title={cloud.message}>
-              {cloud.enabled ? <Cloud size={14} className="text-[#34c759]" /> : <CloudOff size={14} />}
-              {syncLabel}
-            </span>
+            {cloud.enabled && cloud.user ? (
+              <button
+                type="button"
+                onClick={cloud.onManualSync}
+                disabled={syncBusy}
+                title={cloud.message}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-black shadow-sm disabled:cursor-wait disabled:opacity-70 sm:px-3 ${syncClass}`}
+              >
+                <Cloud size={14} className={cloud.syncState === 'error' ? 'text-red-500' : 'text-[#34c759]'} />
+                <span>{syncLabel}</span>
+              </button>
+            ) : (
+              <span className={`inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-black shadow-sm sm:px-3 ${syncClass}`} title={cloud.message}>
+                {cloud.enabled ? <Cloud size={14} /> : <CloudOff size={14} />}
+                <span>{syncLabel}</span>
+              </span>
+            )}
             <Link to="/profile" className="hidden max-w-[190px] items-center gap-2 rounded-2xl bg-white/75 px-2 py-1.5 shadow-sm hover:bg-white sm:flex">
               <ProfileAvatar profile={profile} size="sm" />
               <span className="min-w-0">
@@ -1566,7 +1615,8 @@ function PixelItemIcon({ name, earned }) {
 
 function LearningOverviewPanel({ data }) {
   const [now, setNow] = useState(() => Date.now())
-  const [selectedDateKey, setSelectedDateKey] = useState(() => todayKey())
+  const [selectedDateKey, setSelectedDateKey] = useState(null)
+  const [focusRange, setFocusRange] = useState('week')
   const activity = getActivity(data)
   const storedTodaySeconds = getTodaySiteSeconds(data)
   const liveBaseRef = useRef({ todaySeconds: storedTodaySeconds, siteSeconds: activity.siteSeconds, startedAt: now })
@@ -1583,25 +1633,22 @@ function LearningOverviewPanel({ data }) {
   const currentDate = new Date(now)
   const liveElapsed = Math.floor((now - liveBaseRef.current.startedAt) / 1000)
   const liveTodaySeconds = liveBaseRef.current.todaySeconds + liveElapsed
-  const liveSiteSeconds = liveBaseRef.current.siteSeconds + liveElapsed
   const calendarDays = getMonthCalendarDays(currentDate)
   const activityMap = getCalendarActivityMap(data)
-  const chapterRows = getTopChapterTimeRows(data, 4)
-  const maxChapterSeconds = Math.max(...chapterRows.map((row) => row.seconds), 1)
   const summary = stats(data)
   const profile = getStoredProfile(data)
   const goalSeconds = profile.dailyGoalMinutes * 60
-  const todayFocusCount = getTodayFocusCount(data)
-  const selectedDetails = getDateStudyDetails(data, selectedDateKey)
-  const selectedActivity = activityMap.get(selectedDateKey) ?? { cards: 0, reviews: 0, logs: 0 }
+  const selectedDetails = selectedDateKey ? getDateStudyDetails(data, selectedDateKey) : null
+  const selectedActivity = selectedDateKey ? (activityMap.get(selectedDateKey) ?? { cards: 0, reviews: 0, logs: 0 }) : { cards: 0, reviews: 0, logs: 0 }
   const deckById = new Map(data.decks.map((deck) => [deck.id, deck]))
   const countdownInfo = getCountdownInfo(data, now)
+  const focusSummary = getFocusSummary(data, focusRange, currentDate)
   const monthLabel = currentDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })
   const todayLabel = currentDate.toLocaleDateString('zh-CN', { weekday: 'short', month: '2-digit', day: '2-digit' })
 
   return (
     <section className="mb-5 overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
         <div className="border-b border-gray-100 p-5 lg:border-b-0 lg:border-r">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -1622,7 +1669,7 @@ function LearningOverviewPanel({ data }) {
                 <button
                   key={day.key}
                   type="button"
-                  onClick={() => setSelectedDateKey(day.key)}
+                  onClick={() => setSelectedDateKey((current) => (current === day.key ? null : day.key))}
                   title={`${getDateLabel(day.key)}：新增 ${dayActivity?.cards ?? 0}，复习 ${dayActivity?.reviews ?? 0}`}
                   className={`relative grid h-8 place-items-center rounded-lg text-xs font-black transition-colors ${selected ? 'bg-gray-950 text-white' : day.isToday ? 'bg-[#007aff] text-white' : day.inMonth ? 'bg-gray-50 text-gray-700 hover:bg-gray-100' : 'text-gray-300 hover:bg-gray-50'}`}
                 >
@@ -1632,38 +1679,10 @@ function LearningOverviewPanel({ data }) {
               )
             })}
           </div>
-
-          <div className="mt-4 rounded-xl bg-gray-50 p-3">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-xs font-black text-gray-800">{getDateLabel(selectedDateKey)}</p>
-              <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-black text-gray-400">
-                新增 {selectedActivity.cards} · 复习 {selectedActivity.reviews}
-              </span>
-            </div>
-            <div className="max-h-[150px] overflow-y-auto space-y-2">
-              {selectedDetails.cards.length === 0 && !selectedDetails.dailyLog?.content?.trim() && selectedDetails.reviews.length === 0 && (
-                <p className="py-4 text-center text-xs font-bold text-gray-400">这天还没有学习记录。</p>
-              )}
-              {selectedDetails.cards.slice(0, 4).map((card) => {
-                const deck = deckById.get(card.deckId)
-                return (
-                  <div key={card.id} className="rounded-lg bg-white px-3 py-2">
-                    <p className="line-clamp-1 text-xs font-black text-gray-800">{card.front}</p>
-                    <p className="mt-1 line-clamp-1 text-[11px] font-bold text-gray-400">{deck?.name ?? '未归档'} · 新增卡片</p>
-                  </div>
-                )
-              })}
-              {selectedDetails.dailyLog?.content?.trim() && (
-                <div className="rounded-lg bg-white px-3 py-2">
-                  <p className="text-xs font-black text-gray-800">今日复盘</p>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-500">{selectedDetails.dailyLog.content}</p>
-                </div>
-              )}
-            </div>
-          </div>
+          <p className="mt-3 text-[11px] font-bold text-gray-300">点击日期展开当天记录，再点一次收起。</p>
         </div>
 
-        <div className="border-b border-gray-100 p-5 lg:border-b-0 lg:border-r">
+        <div className="p-5">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-300">Today</p>
@@ -1677,52 +1696,102 @@ function LearningOverviewPanel({ data }) {
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {[
-              { label: '今日停留', value: formatDuration(liveTodaySeconds, true), detail: `目标 ${Math.round(Math.min(100, (liveTodaySeconds / Math.max(goalSeconds, 1)) * 100))}%`, icon: Target },
-              { label: '专注次数', value: todayFocusCount, detail: `累计 ${activity.focusSessions}`, icon: Brain },
-              { label: '掌握知识点', value: summary.mastered, detail: `${summary.learned}/${data.cards.length} 已学`, icon: BookOpen },
-              { label: '今日到期', value: summary.dueToday, detail: '待复习卡片', icon: Layers3 },
-            ].map((item) => {
-              const Icon = item.icon
-              return (
-                <div key={item.label} className="rounded-xl bg-gray-50 px-4 py-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-black text-gray-400">{item.label}</p>
-                    <Icon size={16} className="text-gray-300" />
-                  </div>
-                  <p className="text-2xl font-black text-gray-950">{item.value}</p>
-                  <p className="mt-1 text-[11px] font-bold text-gray-400">{item.detail}</p>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-300">Chapter Time</p>
-              <h2 className="mt-1 text-lg font-black text-gray-950">学习页专注耗时</h2>
+            <div className="rounded-xl bg-gray-50 px-4 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[11px] font-black text-gray-400">今日停留</p>
+                <Target size={16} className="text-gray-300" />
+              </div>
+              <p className="text-2xl font-black text-gray-950">{formatDuration(liveTodaySeconds, true)}</p>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">目标 {Math.round(Math.min(100, (liveTodaySeconds / Math.max(goalSeconds, 1)) * 100))}%</p>
             </div>
-            <span className="rounded-lg bg-purple-50 px-2 py-1 text-[11px] font-black text-purple-700">{chapterRows.length || 0} 项</span>
-          </div>
 
-          <div className="space-y-3">
-            {chapterRows.length === 0 && <p className="rounded-xl bg-gray-50 px-4 py-5 text-sm font-bold text-gray-400">只在学习页且最近有操作时累计。</p>}
-            {chapterRows.map((row) => (
-              <div key={row.key}>
-                <div className="mb-1.5 flex items-center justify-between gap-3 text-xs font-black">
-                  <span className="truncate text-gray-700">{row.label}</span>
-                  <span className="shrink-0 text-gray-400">{formatDuration(row.seconds, true)}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-                  <div className="h-full rounded-full bg-[#af52de]" style={{ width: `${Math.max(8, Math.round((row.seconds / maxChapterSeconds) * 100))}%` }} />
+            <div className="rounded-xl bg-gray-50 px-4 py-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-black text-gray-400">专注次数</p>
+                <div className="grid grid-cols-2 rounded-lg bg-white p-0.5 text-[10px] font-black">
+                  {[
+                    { value: 'week', label: '周' },
+                    { value: 'month', label: '月' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setFocusRange(option.value)}
+                      className={`h-5 rounded-md px-2 ${focusRange === option.value ? 'bg-gray-950 text-white' : 'text-gray-400 hover:text-gray-700'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
+              <p className="text-2xl font-black text-gray-950">{focusSummary.count}</p>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">{focusSummary.label} · 活跃 {focusSummary.days} 天 · 总 {focusSummary.total}</p>
+            </div>
+
+            <div className="rounded-xl bg-gray-50 px-4 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[11px] font-black text-gray-400">掌握知识点</p>
+                <BookOpen size={16} className="text-gray-300" />
+              </div>
+              <p className="text-2xl font-black text-gray-950">{summary.mastered}</p>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">{summary.learned}/{data.cards.length} 已学</p>
+            </div>
+
+            <div className="rounded-xl bg-gray-50 px-4 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[11px] font-black text-gray-400">今日到期</p>
+                <Layers3 size={16} className="text-gray-300" />
+              </div>
+              <p className="text-2xl font-black text-gray-950">{summary.dueToday}</p>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">待复习卡片</p>
+            </div>
           </div>
         </div>
       </div>
+
+      {selectedDateKey && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          className="border-t border-gray-100 bg-white"
+        >
+          <div className="grid grid-cols-1 gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-300">Selected Day</p>
+              <h3 className="mt-1 text-lg font-black text-gray-950">{getDateLabel(selectedDateKey)}</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-lg bg-gray-50 px-2 py-1 text-[11px] font-black text-gray-500">新增 {selectedActivity.cards}</span>
+                <span className="rounded-lg bg-gray-50 px-2 py-1 text-[11px] font-black text-gray-500">复习 {selectedActivity.reviews}</span>
+                <span className="rounded-lg bg-gray-50 px-2 py-1 text-[11px] font-black text-gray-500">复盘 {selectedActivity.logs}</span>
+              </div>
+              <button type="button" onClick={() => setSelectedDateKey(null)} className="mt-4 h-8 rounded-lg bg-gray-100 px-3 text-xs font-black text-gray-500 hover:bg-gray-200">
+                收起
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {selectedDetails.cards.length === 0 && !selectedDetails.dailyLog?.content?.trim() && selectedDetails.reviews.length === 0 && (
+                <p className="rounded-xl bg-gray-50 px-4 py-8 text-center text-sm font-bold text-gray-400 md:col-span-2">这天还没有学习记录。</p>
+              )}
+              {selectedDetails.cards.slice(0, 6).map((card) => {
+                const deck = deckById.get(card.deckId)
+                return (
+                  <div key={card.id} className="rounded-xl bg-gray-50 px-4 py-3">
+                    <p className="line-clamp-1 text-sm font-black text-gray-800">{card.front}</p>
+                    <p className="mt-1 line-clamp-1 text-xs font-bold text-gray-400">{deck?.name ?? '未归档'} · 新增卡片</p>
+                  </div>
+                )
+              })}
+              {selectedDetails.dailyLog?.content?.trim() && (
+                <div className="rounded-xl bg-gray-50 px-4 py-3 md:col-span-2">
+                  <p className="text-sm font-black text-gray-800">今日复盘</p>
+                  <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-gray-500">{selectedDetails.dailyLog.content}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
     </section>
   )
 }
@@ -2065,8 +2134,9 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onSaveDai
           <p className="text-xs text-gray-500 mt-1">按法硕科目、章节和专题组织复习材料。</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={openCreateDeckForCurrentSection} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">新建卡组</button>
-          <button onClick={() => selectedDeckId && navigate(`/cards/new/${selectedDeckId}`)} className="h-10 px-4 rounded-xl bg-[#007aff] text-white text-sm font-bold shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300 flex items-center gap-1.5" disabled={!selectedDeckId}><Plus size={16} />添加卡片</button>
+          <button onClick={() => selectedDeckId && navigate(`/cards/new/${selectedDeckId}`)} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300" disabled={!selectedDeckId}>添加</button>
+          <button onClick={() => navigate('/import')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300" disabled={!selectedDeckId}>导入</button>
+          <button onClick={() => selectedDeckId && navigate(`/study/${selectedDeckId}`)} className="h-10 px-4 rounded-xl bg-[#007aff] text-white text-sm font-bold shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={!selectedDeckId}>学习</button>
         </div>
       </header>
 

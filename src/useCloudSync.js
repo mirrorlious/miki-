@@ -365,6 +365,57 @@ export function useCloudSync(data, setData) {
     await signOut(auth)
   }
 
+  const manualSyncNow = async () => {
+    if (!hasFirebaseConfig || !auth || !db) {
+      setAuthError('还没配置 Firebase，暂时只能使用本地模式。')
+      return false
+    }
+    if (!user) {
+      setAuthError('请先登录账号再同步。')
+      setMessage('请先登录账号再同步。')
+      return false
+    }
+
+    setAuthError('')
+    setSyncState('syncing')
+    setMessage('正在手动同步云端数据...')
+
+    try {
+      const { doc, getDoc, setDoc, serverTimestamp } = await import('firebase/firestore')
+      const ref = doc(db, 'memorizerUsers', user.uid)
+      const snap = await getDoc(ref)
+      const remotePayload = snap.data()?.payload
+      const localPayload = latestDataRef.current
+      const merged = snap.exists() && remotePayload?.decks && remotePayload?.cards
+        ? mergeMemorizerData(localPayload, remotePayload)
+        : localPayload
+      const serialized = JSON.stringify(merged)
+
+      await setDoc(ref, {
+        payload: merged,
+        owner: {
+          uid: user.uid,
+          email: user.email ?? null,
+          displayName: user.displayName ?? null,
+        },
+        updatedAt: serverTimestamp(),
+      }, { merge: true })
+
+      readyRef.current = true
+      lastSerializedRef.current = serialized
+      setData(merged)
+      setLastSyncedAt(Date.now())
+      setSyncState('synced')
+      setMessage(`手动同步完成：${getAccountLabel(user)}`)
+      return true
+    } catch (error) {
+      setAuthError(mapAuthError(error))
+      setSyncState('error')
+      setMessage('手动同步失败，请稍后再试。')
+      return false
+    }
+  }
+
   return {
     enabled: hasFirebaseConfig,
     user,
@@ -380,6 +431,7 @@ export function useCloudSync(data, setData) {
     onSignInWithEmail: signInWithEmail,
     onSignUpWithEmail: signUpWithEmail,
     onResetPassword: resetPassword,
+    onManualSync: manualSyncNow,
     onSignOut: signOutNow,
   }
 }
