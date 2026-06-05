@@ -3,8 +3,6 @@ import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 const FIELD_SEPARATOR = '\x1f'
-const DEFAULT_MAX_INLINE_MEDIA_BYTES = 180 * 1024
-const MEDIA_REF_PATTERN = /\b(?:src|href)=["']([^"']+)["']|\[sound:([^\]]+)\]/gi
 
 let sqlPromise = null
 
@@ -42,54 +40,6 @@ function normalizeTags(value = '') {
     .filter(Boolean)
 }
 
-function normalizeName(value = '') {
-  try {
-    return decodeURIComponent(String(value).trim())
-  } catch {
-    return String(value).trim()
-  }
-}
-
-function basename(value = '') {
-  return normalizeName(value).split('/').pop()
-}
-
-function isExternalMediaRef(value = '') {
-  return /^(?:https?:|data:|blob:|#|mailto:)/i.test(value)
-}
-
-function inferMimeType(name = '') {
-  const lower = name.toLowerCase()
-  if (lower.endsWith('.png')) return 'image/png'
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
-  if (lower.endsWith('.gif')) return 'image/gif'
-  if (lower.endsWith('.webp')) return 'image/webp'
-  if (lower.endsWith('.svg')) return 'image/svg+xml'
-  if (lower.endsWith('.mp3')) return 'audio/mpeg'
-  if (lower.endsWith('.ogg')) return 'audio/ogg'
-  if (lower.endsWith('.wav')) return 'audio/wav'
-  if (lower.endsWith('.m4a')) return 'audio/mp4'
-  if (lower.endsWith('.mp4')) return 'video/mp4'
-  return 'application/octet-stream'
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(blob)
-  })
-}
-
-async function defaultResolveMediaUrl({ blob }) {
-  if (blob.size > DEFAULT_MAX_INLINE_MEDIA_BYTES) return null
-  return {
-    url: await blobToDataUrl(blob),
-    mode: 'inline',
-  }
-}
-
 function extractCollectionFile(zip) {
   const candidates = ['collection.anki21', 'collection.anki2', 'collection.anki21b']
   for (const name of candidates) {
@@ -98,12 +48,6 @@ function extractCollectionFile(zip) {
   }
 
   return zip.file(/collection\.anki(?:2|21|21b)$/i)[0] ?? null
-}
-
-function extractMediaMapping(zip) {
-  const mediaFile = zip.file('media')
-  if (!mediaFile) return {}
-  return mediaFile.async('string').then((content) => parseJson(content, {}))
 }
 
 function splitFields(note, model) {
@@ -167,102 +111,6 @@ function renderTemplate(template, context) {
   return html.trim()
 }
 
-function collectMediaNames(html) {
-  const names = new Set()
-  for (const match of String(html ?? '').matchAll(MEDIA_REF_PATTERN)) {
-    const rawName = match[1] || match[2]
-    if (!rawName || isExternalMediaRef(rawName)) continue
-    names.add(normalizeName(rawName))
-  }
-  return names
-}
-
-function replaceMediaRefs(html, resolvedMedia) {
-  return String(html ?? '')
-    .replace(/\bsrc=(["'])([^"']+)\1/gi, (match, quote, rawName) => {
-      const name = normalizeName(rawName)
-      const media = resolvedMedia.get(name) ?? resolvedMedia.get(basename(name))
-      if (!media?.url) return match
-      return `src=${quote}${media.url}${quote}`
-    })
-    .replace(/\bhref=(["'])([^"']+)\1/gi, (match, quote, rawName) => {
-      const name = normalizeName(rawName)
-      const media = resolvedMedia.get(name) ?? resolvedMedia.get(basename(name))
-      if (!media?.url) return match
-      return `href=${quote}${media.url}${quote}`
-    })
-    .replace(/\[sound:([^\]]+)\]/gi, (match, rawName) => {
-      const name = normalizeName(rawName)
-      const media = resolvedMedia.get(name) ?? resolvedMedia.get(basename(name))
-      if (!media?.url) return match
-      return `<audio controls src="${media.url}" class="anki-audio"></audio>`
-    })
-}
-
-function buildMediaIndex(zip, mapping) {
-  const index = new Map()
-
-  for (const [zipName, originalName] of Object.entries(mapping)) {
-    const file = zip.file(zipName)
-    if (!file) continue
-    const cleanName = normalizeName(originalName)
-    const media = {
-      zipName,
-      name: cleanName,
-      file,
-      mimeType: inferMimeType(cleanName),
-    }
-    index.set(cleanName, media)
-    index.set(basename(cleanName), media)
-  }
-
-  return index
-}
-
-async function resolveUsedMedia(usedMediaNames, mediaIndex, resolveMediaUrl) {
-  const resolvedMedia = new Map()
-  const warnings = []
-  const usedMedia = []
-
-  for (const name of usedMediaNames) {
-    const media = mediaIndex.get(name) ?? mediaIndex.get(basename(name))
-    if (!media) {
-      warnings.push(`未找到媒体：${name}`)
-      continue
-    }
-
-    try {
-      const blob = await media.file.async('blob')
-      const result = await (resolveMediaUrl ?? defaultResolveMediaUrl)({
-        name: media.name,
-        zipName: media.zipName,
-        blob,
-        mimeType: media.mimeType,
-      })
-      if (!result?.url) {
-        warnings.push(`媒体过大或未上传：${media.name}`)
-        continue
-      }
-      const item = {
-        originalName: media.name,
-        zipName: media.zipName,
-        mimeType: media.mimeType,
-        size: blob.size,
-        mode: result.mode ?? 'url',
-        url: result.url,
-        storagePath: result.storagePath ?? '',
-      }
-      resolvedMedia.set(media.name, item)
-      resolvedMedia.set(basename(media.name), item)
-      usedMedia.push(item)
-    } catch (error) {
-      warnings.push(`${media.name} 处理失败：${error?.message || '未知错误'}`)
-    }
-  }
-
-  return { resolvedMedia, usedMedia, warnings }
-}
-
 function readAnkiData(db) {
   const collection = rowsFromQuery(db, 'SELECT decks, models FROM col LIMIT 1')[0]
   const decks = parseJson(collection?.decks ?? '{}', {})
@@ -282,18 +130,15 @@ export async function parseApkgFile(file, options = {}) {
     throw new Error('这个 APKG 里没有找到 collection.anki2 / collection.anki21。')
   }
 
-  const [SQL, collectionBuffer, mediaMapping] = await Promise.all([
+  const [SQL, collectionBuffer] = await Promise.all([
     getSql(),
     collectionFile.async('uint8array'),
-    extractMediaMapping(zip),
   ])
 
   const db = new SQL.Database(collectionBuffer)
   try {
     const { decks, models, notesById, cards } = readAnkiData(db)
-    const mediaIndex = buildMediaIndex(zip, mediaMapping)
     const rawCards = []
-    const usedMediaNames = new Set()
     const deckNames = new Set()
 
     for (const card of cards) {
@@ -325,8 +170,6 @@ export async function parseApkgFile(file, options = {}) {
       const backText = stripHtml(backHtml) || Object.values(fields).filter(Boolean).slice(1).join('\n') || frontText
 
       deckNames.add(deckName)
-      for (const name of collectMediaNames(frontHtml)) usedMediaNames.add(name)
-      for (const name of collectMediaNames(backHtml)) usedMediaNames.add(name)
 
       rawCards.push({
         id: `anki-${card.id}`,
@@ -352,38 +195,13 @@ export async function parseApkgFile(file, options = {}) {
       })
     }
 
-    const mediaResult = await resolveUsedMedia(usedMediaNames, mediaIndex, options.resolveMediaUrl)
-    const importedCards = rawCards.map((card) => {
-      const frontHtml = replaceMediaRefs(card.frontHtml, mediaResult.resolvedMedia)
-      const backHtml = replaceMediaRefs(card.backHtml, mediaResult.resolvedMedia)
-      return {
-        ...card,
-        frontHtml,
-        backHtml,
-        media: mediaResult.usedMedia
-          .filter((media) => frontHtml.includes(media.url) || backHtml.includes(media.url))
-          .map(({ originalName, zipName, mimeType, size, mode, storagePath, url }) => ({
-            originalName,
-            zipName,
-            mimeType,
-            size,
-            mode,
-            storagePath,
-            url,
-          })),
-      }
-    })
-
     return {
       importId,
-      cards: importedCards.filter((card) => card.front && card.back),
+      cards: rawCards.filter((card) => card.front && card.back),
       deckNames: Array.from(deckNames).sort((a, b) => a.localeCompare(b, 'zh-CN')),
       noteCount: notesById.size,
       cardCount: cards.length,
-      mediaCount: Object.keys(mediaMapping).length,
-      usedMediaCount: usedMediaNames.size,
-      resolvedMediaCount: mediaResult.usedMedia.length,
-      warnings: mediaResult.warnings.slice(0, 20),
+      warnings: [],
     }
   } finally {
     db.close()

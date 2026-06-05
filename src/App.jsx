@@ -45,7 +45,6 @@ import {
 import { parseApkgFile } from './apkgImport'
 import { parseBulkCards, parseMarkdownCards } from './cardImport'
 import { loadData, scheduleReview, stats, STORAGE_KEY, todayKey } from './data'
-import { storage } from './lib/firebase'
 import { useCloudSync } from './useCloudSync'
 
 const DECK_COLOR_OPTIONS = [
@@ -62,7 +61,6 @@ const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对
 const ACTIVITY_TICK_SECONDS = 10
 const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
-const APKG_INLINE_MEDIA_BYTES = 180 * 1024
 const STUDY_GRADE_OPTIONS = [
   {
     grade: 0,
@@ -2759,36 +2757,6 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
     }
   }, [data.decks, selectedDeckId])
 
-  async function resolveApkgMediaUrl(importId, media) {
-    if (media.blob.size <= APKG_INLINE_MEDIA_BYTES) {
-      return {
-        url: await readFileAsDataUrl(media.blob),
-        mode: 'inline',
-      }
-    }
-
-    if (!cloud.user || !storage) return null
-
-    const { getDownloadURL, ref, uploadBytes } = await import('firebase/storage')
-    const safeName = encodeURIComponent(media.name || media.zipName || `media-${Date.now()}`).replace(/%/g, '_')
-    const storagePath = `users/${cloud.user.uid}/anki-media/${importId}/${safeName}`
-    const mediaRef = ref(storage, storagePath)
-
-    await uploadBytes(mediaRef, media.blob, {
-      contentType: media.mimeType || media.blob.type || 'application/octet-stream',
-      customMetadata: {
-        originalName: media.name || '',
-        source: 'apkg',
-      },
-    })
-
-    return {
-      url: await getDownloadURL(mediaRef),
-      mode: 'storage',
-      storagePath,
-    }
-  }
-
   function handleImport() {
     if (!selectedDeckId) {
       setMessage('请先选择一个卡组。')
@@ -2828,13 +2796,9 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
       try {
         const result = await parseApkgFile(file, {
           importId,
-          resolveMediaUrl: (media) => resolveApkgMediaUrl(importId, media),
         })
         setApkgImport(result)
-        const mediaText = result.usedMediaCount > 0
-          ? `，媒体 ${result.resolvedMediaCount}/${result.usedMediaCount} 个`
-          : ''
-        setMessage(`已解析 ${result.cards.length} 张 Anki 卡${mediaText}。`)
+        setMessage(`已解析 ${result.cards.length} 张 Anki 卡。图片、音频等媒体文件会跳过，不会上传。`)
       } catch (error) {
         setMessage(error?.message || 'Anki 包解析失败。')
       } finally {
@@ -2953,9 +2917,9 @@ constraint\t限制；约束条件`
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { label: '媒体文件', value: apkgImport.mediaCount },
-                      { label: '模板引用', value: apkgImport.usedMediaCount },
-                      { label: '已可显示', value: apkgImport.resolvedMediaCount },
+                      { label: '原始笔记', value: apkgImport.noteCount },
+                      { label: '原始卡片', value: apkgImport.cardCount },
+                      { label: '可导入', value: apkgImport.cards.length },
                       { label: '提示', value: apkgImport.warnings.length },
                     ].map((item) => (
                       <div key={item.label} className="rounded-2xl bg-gray-50 px-4 py-3">
@@ -2980,7 +2944,7 @@ constraint\t限制；约束条件`
                   <div>
                     <Upload size={30} className="mx-auto mb-3 text-gray-300" />
                     <p className="text-sm font-black text-gray-700">{isParsingFile ? '正在解析 Anki 包...' : '选择 .apkg 或 .colpkg 文件'}</p>
-                    <p className="mt-2 max-w-md text-xs leading-6 text-gray-400">会读取 Anki 的模板 HTML、字段替换、FrontSide、cloze 和媒体引用。大媒体需要登录并配置 Storage Rules 才能上传。</p>
+                    <p className="mt-2 max-w-md text-xs leading-6 text-gray-400">会读取 Anki 的模板 HTML、字段替换、FrontSide 和 cloze。图片、音频等媒体文件会跳过，不上传。</p>
                   </div>
                 </div>
               )}
@@ -4065,7 +4029,6 @@ export default function App() {
             ...(cardValue.frontHtml ? { frontHtml: cardValue.frontHtml } : {}),
             ...(cardValue.backHtml ? { backHtml: cardValue.backHtml } : {}),
             ...(cardValue.cardCss ? { cardCss: cardValue.cardCss } : {}),
-            ...(cardValue.media ? { media: cardValue.media } : {}),
             ...(cardValue.sourceKey ? { sourceKey: cardValue.sourceKey } : {}),
             ...(cardValue.source ? { source: cardValue.source } : {}),
             createdAt: Date.now(),
@@ -4101,7 +4064,6 @@ export default function App() {
             ...(card.frontHtml ? { frontHtml: card.frontHtml } : {}),
             ...(card.backHtml ? { backHtml: card.backHtml } : {}),
             ...(card.cardCss ? { cardCss: card.cardCss } : {}),
-            ...(card.media ? { media: card.media } : {}),
             ...(card.sourceKey ? { sourceKey: card.sourceKey } : {}),
             ...(card.source ? { source: card.source } : {}),
           }
