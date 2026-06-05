@@ -47,10 +47,111 @@ function validateEmailPassword(email, password, { allowEmptyPassword = false } =
   return ''
 }
 
+function itemTime(item) {
+  return Number(item?.updatedAt ?? item?.createdAt ?? item?.reviewedAt ?? item?.startedAt ?? item?.redeemedAt ?? 0) || 0
+}
+
+function mergeById(localItems = [], remoteItems = []) {
+  const items = new Map()
+
+  for (const item of remoteItems) {
+    if (item?.id) items.set(item.id, item)
+  }
+
+  for (const item of localItems) {
+    if (!item?.id) continue
+    const existing = items.get(item.id)
+    if (!existing || itemTime(item) >= itemTime(existing)) {
+      items.set(item.id, item)
+    }
+  }
+
+  return Array.from(items.values()).sort((a, b) => itemTime(b) - itemTime(a))
+}
+
+function mergeDailyLogs(localLogs = [], remoteLogs = []) {
+  const logs = new Map()
+
+  for (const log of remoteLogs) {
+    if (log?.date) logs.set(log.date, log)
+  }
+
+  for (const log of localLogs) {
+    if (!log?.date) continue
+    const existing = logs.get(log.date)
+    if (!existing || itemTime(log) >= itemTime(existing)) {
+      logs.set(log.date, log)
+    }
+  }
+
+  return Array.from(logs.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)))
+}
+
+function mergeNumberMaps(localMap = {}, remoteMap = {}, mode = 'max') {
+  const keys = new Set([...Object.keys(remoteMap ?? {}), ...Object.keys(localMap ?? {})])
+  return Array.from(keys).reduce((next, key) => {
+    const localValue = Number(localMap?.[key]) || 0
+    const remoteValue = Number(remoteMap?.[key]) || 0
+    next[key] = mode === 'sum' ? localValue + remoteValue : Math.max(localValue, remoteValue)
+    return next
+  }, {})
+}
+
+function mergeProfile(localProfile = {}, remoteProfile = {}) {
+  const localRewards = Array.isArray(localProfile.redeemedRewards) ? localProfile.redeemedRewards : []
+  const remoteRewards = Array.isArray(remoteProfile.redeemedRewards) ? remoteProfile.redeemedRewards : []
+  const rewardMap = new Map()
+
+  for (const reward of [...remoteRewards, ...localRewards]) {
+    if (!reward?.rewardId) continue
+    const existing = rewardMap.get(reward.rewardId)
+    if (!existing || itemTime(reward) >= itemTime(existing)) rewardMap.set(reward.rewardId, reward)
+  }
+
+  const preferred = itemTime(localProfile) >= itemTime(remoteProfile) ? localProfile : remoteProfile
+  return {
+    ...remoteProfile,
+    ...localProfile,
+    ...preferred,
+    redeemedRewards: Array.from(rewardMap.values()).sort((a, b) => itemTime(b) - itemTime(a)),
+  }
+}
+
+function mergeActivity(localActivity = {}, remoteActivity = {}) {
+  const focusLog = mergeById(localActivity.focusLog, remoteActivity.focusLog).slice(0, 300)
+  return {
+    ...remoteActivity,
+    ...localActivity,
+    siteSeconds: Math.max(Number(localActivity.siteSeconds) || 0, Number(remoteActivity.siteSeconds) || 0),
+    dailySiteSeconds: mergeNumberMaps(localActivity.dailySiteSeconds, remoteActivity.dailySiteSeconds),
+    deckSeconds: mergeNumberMaps(localActivity.deckSeconds, remoteActivity.deckSeconds),
+    focusLog,
+    focusSessions: Math.max(Number(localActivity.focusSessions) || 0, Number(remoteActivity.focusSessions) || 0, focusLog.length),
+    updatedAt: Math.max(itemTime(localActivity), itemTime(remoteActivity)),
+  }
+}
+
+function mergeMemorizerData(localData, remoteData) {
+  if (!remoteData?.decks || !remoteData?.cards) return localData
+  if (!localData?.decks || !localData?.cards) return remoteData
+
+  return {
+    ...remoteData,
+    ...localData,
+    profile: mergeProfile(localData.profile, remoteData.profile),
+    decks: mergeById(localData.decks, remoteData.decks),
+    cards: mergeById(localData.cards, remoteData.cards),
+    reviewLogs: mergeById(localData.reviewLogs, remoteData.reviewLogs).slice(0, 400),
+    dailyLogs: mergeDailyLogs(localData.dailyLogs, remoteData.dailyLogs),
+    activity: mergeActivity(localData.activity, remoteData.activity),
+  }
+}
+
 export function useCloudSync(data, setData) {
   const [user, setUser] = useState(null)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
   const [message, setMessage] = useState(hasFirebaseConfig ? '请登录账号，登录后手机和电脑会同步同一份数据。' : '还没配置 Firebase，所以当前只会保存在本机浏览器。')
+  const [syncState, setSyncState] = useState(hasFirebaseConfig ? 'signed-out' : 'disabled')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
   const readyRef = useRef(false)
@@ -81,10 +182,12 @@ export function useCloudSync(data, setData) {
 
         if (!nextUser) {
           setMessage('已退出云同步，当前继续使用本地数据。')
+          setSyncState('signed-out')
           return
         }
 
         setMessage('正在连接云端数据...')
+        setSyncState('connecting')
         const ref = doc(db, 'memorizerUsers', nextUser.uid)
 
         stopSnap = onSnapshot(ref, async (snap) => {
@@ -93,11 +196,26 @@ export function useCloudSync(data, setData) {
           try {
             const payload = snap.data()?.payload
             if (snap.exists() && payload?.decks && payload?.cards) {
-              lastSerializedRef.current = JSON.stringify(payload)
+              const merged = mergeMemorizerData(latestDataRef.current, payload)
+              const mergedSerialized = JSON.stringify(merged)
+              const remoteSerialized = JSON.stringify(payload)
+              lastSerializedRef.current = mergedSerialized
               readyRef.current = true
-              setData(payload)
+              setData(merged)
               setLastSyncedAt(Date.now())
-              setMessage(`云端数据已连接：${getAccountLabel(nextUser)}`)
+              setSyncState('synced')
+              setMessage(`云端数据已合并：${getAccountLabel(nextUser)}`)
+              if (mergedSerialized !== remoteSerialized) {
+                await setDoc(ref, {
+                  payload: merged,
+                  owner: {
+                    uid: nextUser.uid,
+                    email: nextUser.email ?? null,
+                    displayName: nextUser.displayName ?? null,
+                  },
+                  updatedAt: serverTimestamp(),
+                }, { merge: true })
+              }
               return
             }
 
@@ -111,16 +229,19 @@ export function useCloudSync(data, setData) {
                 displayName: nextUser.displayName ?? null,
               },
               updatedAt: serverTimestamp(),
-            })
+            }, { merge: true })
             readyRef.current = true
             setLastSyncedAt(Date.now())
+            setSyncState('synced')
             setMessage('云端文档已初始化，后续会自动同步。')
           } catch (error) {
             setAuthError(mapAuthError(error))
+            setSyncState('error')
             setMessage('云同步失败，请检查 Firebase 配置。')
           }
         }, (error) => {
           setAuthError(mapAuthError(error))
+          setSyncState('error')
           setMessage('云同步连接失败，请检查 Firebase 配置。')
         })
       })
@@ -138,6 +259,7 @@ export function useCloudSync(data, setData) {
     const serialized = JSON.stringify(data)
     if (serialized === lastSerializedRef.current) return
     if (timerRef.current) clearTimeout(timerRef.current)
+    setSyncState('syncing')
 
     timerRef.current = setTimeout(async () => {
       try {
@@ -150,12 +272,14 @@ export function useCloudSync(data, setData) {
             displayName: user.displayName ?? null,
           },
           updatedAt: serverTimestamp(),
-        })
+        }, { merge: true })
         lastSerializedRef.current = serialized
         setLastSyncedAt(Date.now())
+        setSyncState('synced')
         setMessage(`已同步到云端：${getAccountLabel(user)}`)
       } catch (error) {
         setAuthError(mapAuthError(error))
+        setSyncState('error')
         setMessage('这次同步没有成功。')
       }
     }, 500)
@@ -247,6 +371,7 @@ export function useCloudSync(data, setData) {
     accountLabel: getAccountLabel(user),
     lastSyncedAt,
     message,
+    syncState,
     authBusy,
     authError,
     onClearAuthError: () => setAuthError(''),

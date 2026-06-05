@@ -56,7 +56,8 @@ const DEFAULT_DECK_SECTIONS = ['法理', '宪法', '民法', '刑法', '法制�
 const UNGROUPED_SECTION = '未分组'
 const PROFESSIONAL_SECTIONS = ['法理', '宪法', '民法', '刑法', '法制史']
 const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对比']
-const ACTIVITY_TICK_SECONDS = 60
+const ACTIVITY_TICK_SECONDS = 10
+const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
 const STUDY_GRADE_OPTIONS = [
   {
@@ -251,6 +252,41 @@ const REWARD_OPTIONS = [
   },
 ]
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.onload = () => resolve(image)
+    image.onerror = reject
+    image.src = dataUrl
+  })
+}
+
+async function compressImageFile(file, { maxSize = 900, quality = 0.78 } = {}) {
+  if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件。')
+  const dataUrl = await readFileAsDataUrl(file)
+  if (file.type === 'image/svg+xml' || file.type === 'image/gif') return dataUrl
+
+  const image = await loadImageFromDataUrl(dataUrl)
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
+  const width = Math.max(1, Math.round(image.width * scale))
+  const height = Math.max(1, Math.round(image.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  context.drawImage(image, 0, 0, width, height)
+  return canvas.toDataURL('image/jpeg', quality)
+}
+
 function getDeckSection(deck) {
   return deck?.section?.trim() || UNGROUPED_SECTION
 }
@@ -322,6 +358,22 @@ function getCardAnnotations(card) {
 
 function getCardLinks(card) {
   return Array.isArray(card?.links) ? card.links : []
+}
+
+function toLocalDateKey(value = new Date()) {
+  const date = new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getDateLabel(dateKey) {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+  })
 }
 
 function tokenizeForRelated(value) {
@@ -419,10 +471,10 @@ function getActiveStudyDays(data) {
     if (log.date) days.add(log.date)
   }
   for (const log of getReviewLogs(data)) {
-    if (log.reviewedAt) days.add(new Date(log.reviewedAt).toISOString().slice(0, 10))
+    if (log.reviewedAt) days.add(toLocalDateKey(log.reviewedAt))
   }
   for (const card of data.cards) {
-    if (card.createdAt) days.add(new Date(card.createdAt).toISOString().slice(0, 10))
+    if (card.createdAt) days.add(toLocalDateKey(card.createdAt))
   }
   return Array.from(days).sort()
 }
@@ -461,6 +513,36 @@ function formatCountdown(totalMs) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(restSeconds).padStart(2, '0')}`
 }
 
+function formatCountdownWithDays(totalMs) {
+  const seconds = Math.max(0, Math.floor(totalMs / 1000))
+  const days = Math.floor(seconds / 86400)
+  const rest = seconds % 86400
+  const clock = formatCountdown(rest * 1000)
+  return days > 0 ? `${days}天 ${clock}` : clock
+}
+
+function getCountdownInfo(data, now) {
+  const profile = getStoredProfile(data)
+  if (profile.examDate) {
+    const target = new Date(`${profile.examDate}T23:59:59`).getTime()
+    if (target > now) {
+      return {
+        label: '考试倒计时',
+        detail: profile.examDate,
+        value: formatCountdownWithDays(target - now),
+      }
+    }
+  }
+
+  const currentDate = new Date(now)
+  const endOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + 1)
+  return {
+    label: '今日倒计时',
+    detail: '到今晚 24:00',
+    value: formatCountdown(endOfDay.getTime() - now),
+  }
+}
+
 function getMonthCalendarDays(now = new Date()) {
   const year = now.getFullYear()
   const month = now.getMonth()
@@ -471,12 +553,47 @@ function getMonthCalendarDays(now = new Date()) {
     const day = new Date(start)
     day.setDate(start.getDate() + index)
     return {
-      key: day.toISOString().slice(0, 10),
+      key: toLocalDateKey(day),
       date: day,
       inMonth: day.getMonth() === month,
       isToday: day.toDateString() === now.toDateString(),
     }
   })
+}
+
+function getCalendarActivityMap(data) {
+  const map = new Map()
+  const ensure = (key) => {
+    const current = map.get(key) ?? { cards: 0, reviews: 0, logs: 0 }
+    map.set(key, current)
+    return current
+  }
+
+  for (const card of data.cards) {
+    if (!card.createdAt) continue
+    ensure(toLocalDateKey(card.createdAt)).cards += 1
+  }
+  for (const log of getReviewLogs(data)) {
+    if (!log.reviewedAt) continue
+    ensure(toLocalDateKey(log.reviewedAt)).reviews += 1
+  }
+  for (const log of getDailyLogs(data)) {
+    if (!log.date || !log.content?.trim()) continue
+    ensure(log.date).logs += 1
+  }
+
+  return map
+}
+
+function getDateStudyDetails(data, dateKey) {
+  const cards = data.cards
+    .filter((card) => card.createdAt && toLocalDateKey(card.createdAt) === dateKey)
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+  const reviews = getReviewLogs(data)
+    .filter((log) => log.reviewedAt && toLocalDateKey(log.reviewedAt) === dateKey)
+    .sort((a, b) => (b.reviewedAt ?? 0) - (a.reviewedAt ?? 0))
+  const dailyLog = getDailyLog(data, dateKey)
+  return { cards, reviews, dailyLog }
 }
 
 function getTopChapterTimeRows(data, limit = 4) {
@@ -486,6 +603,9 @@ function getTopChapterTimeRows(data, limit = 4) {
   for (const [deckId, rawSeconds] of Object.entries(activity.deckSeconds)) {
     const deck = data.decks.find((item) => item.id === deckId)
     if (!deck) continue
+    const raw = Math.max(0, Number(rawSeconds) || 0)
+    const siteCap = activity.siteSeconds > 0 ? activity.siteSeconds : raw
+    const seconds = Math.min(raw, siteCap, 12 * 60 * 60)
     const key = getDeckChapterKey(deck)
     const current = rows.get(key) ?? {
       key,
@@ -493,7 +613,7 @@ function getTopChapterTimeRows(data, limit = 4) {
       seconds: 0,
       deckCount: 0,
     }
-    current.seconds += Number(rawSeconds) || 0
+    current.seconds += seconds
     current.deckCount += 1
     rows.set(key, current)
   }
@@ -505,7 +625,7 @@ function getTopChapterTimeRows(data, limit = 4) {
 
 function getTodayFocusCount(data) {
   const today = todayKey()
-  return getActivity(data).focusLog.filter((item) => item.startedAt && new Date(item.startedAt).toISOString().slice(0, 10) === today).length
+  return getActivity(data).focusLog.filter((item) => item.startedAt && toLocalDateKey(item.startedAt) === today).length
 }
 
 function addActivitySeconds(current, seconds, activeDeckId = null) {
@@ -697,35 +817,6 @@ function ProfileAvatar({ profile, size = 'md' }) {
     <div className={`${dimensionClass} grid shrink-0 place-items-center rounded-2xl bg-gray-950 font-black text-white shadow-sm`}>
       {profile.initials}
     </div>
-  )
-}
-
-function SidebarNavItem({ to, icon: Icon, label, description, disabled = false }) {
-  const baseClass = 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors'
-
-  if (disabled) {
-    return (
-      <span className={`${baseClass} cursor-not-allowed text-gray-300`}>
-        <Icon size={17} />
-        <span>
-          <span className="block text-sm font-black">{label}</span>
-          <span className="block text-[11px] font-bold">{description}</span>
-        </span>
-      </span>
-    )
-  }
-
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) => `${baseClass} ${isActive ? 'bg-gray-950 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'}`}
-    >
-      <Icon size={17} />
-      <span>
-        <span className="block text-sm font-black">{label}</span>
-        <span className="block text-[11px] font-bold opacity-60">{description}</span>
-      </span>
-    </NavLink>
   )
 }
 
@@ -997,17 +1088,26 @@ function AuthDialog({ open, cloud, onClose }) {
 function Shell({ children, data, cloud, studyDeckId }) {
   const summary = stats(data)
   const firstDeckId = studyDeckId ?? data.decks[0]?.id
-  const syncLabel = cloud.enabled ? (cloud.user ? '已同步' : '待登录') : '本地模式'
+  const syncLabel = !cloud.enabled
+    ? '本地模式'
+    : !cloud.user
+      ? '待登录'
+      : ({
+        synced: '已同步',
+        syncing: '同步中',
+        connecting: '连接中',
+        error: '同步失败',
+      })[cloud.syncState] ?? '连接中'
   const profile = getProfile(data, cloud)
   const rewardState = getRewardState(data)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
 
   const navItems = [
-    { to: '/decks', icon: LayoutDashboard, label: '仪表盘', description: '今日任务与卡组' },
-    { to: '/browse', icon: AlignLeft, label: '卡片库', description: '搜索和批注', disabled: !firstDeckId },
-    { to: '/organize', icon: FolderOpen, label: '整理', description: '章节与线索', disabled: !firstDeckId },
-    { to: '/app', icon: Target, label: '统计', description: '复习负载' },
-    { to: '/profile', icon: User, label: '个人', description: '头像与奖励' },
+    { to: '/decks', icon: LayoutDashboard, label: '卡组' },
+    { to: '/browse', icon: AlignLeft, label: '浏览', disabled: !firstDeckId },
+    { to: '/organize', icon: FolderOpen, label: '整理', disabled: !firstDeckId },
+    { to: '/app', icon: Target, label: '统计' },
+    { to: '/profile', icon: User, label: '个人' },
   ]
 
   function openAuthDialog() {
@@ -1022,7 +1122,7 @@ function Shell({ children, data, cloud, studyDeckId }) {
     <div className="min-h-screen bg-[#f5f5f7] text-gray-950 font-sans">
       <AuthDialog open={authDialogOpen} cloud={cloud} onClose={() => setAuthDialogOpen(false)} />
       <header className="sticky top-0 z-40 border-b border-white/70 bg-[#f5f5f7]/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
           <Link to="/decks" className="flex items-center gap-3 text-sm font-black text-gray-950">
             <span className="brand-logo" aria-label="mik!">
               <span className="brand-letter brand-letter-m">m</span>
@@ -1040,6 +1140,12 @@ function Shell({ children, data, cloud, studyDeckId }) {
               <span className="hidden sm:block text-[11px] font-semibold text-gray-400 leading-tight">Spaced repetition desk</span>
             </span>
           </Link>
+
+          <nav className="hidden h-11 rounded-xl bg-gray-200/70 p-1 lg:flex items-center gap-1">
+            {navItems.map((item) => (
+              <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
+            ))}
+          </nav>
 
           <div className="hidden items-center gap-2 md:flex">
             {firstDeckId ? (
@@ -1089,51 +1195,16 @@ function Shell({ children, data, cloud, studyDeckId }) {
           </div>
         </div>
 
-        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-5 pb-3 lg:hidden">
+        <nav className="mx-auto flex max-w-6xl gap-2 overflow-x-auto px-5 pb-3 lg:hidden">
           {navItems.map((item) => (
             <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
           ))}
         </nav>
       </header>
 
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-5 py-6 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <aside className="hidden lg:block">
-          <div className="sticky top-[88px] space-y-4">
-            <nav className="rounded-2xl bg-white/90 p-2 shadow-sm ring-1 ring-white">
-              {navItems.map((item) => (
-                <SidebarNavItem key={item.to} {...item} />
-              ))}
-            </nav>
-
-            <section className="rounded-2xl bg-white/90 p-4 shadow-sm ring-1 ring-white">
-              <div className="flex items-center gap-3">
-                <ProfileAvatar profile={profile} />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-black text-gray-950">{profile.nickname}</p>
-                  <p className="text-[11px] font-bold text-gray-400">{syncLabel}</p>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-xl bg-gray-50 px-3 py-2">
-                  <p className="text-lg font-black text-gray-950">{rewardState.totalPoints}</p>
-                  <p className="text-[10px] font-bold text-gray-400">成就点</p>
-                </div>
-                <div className="rounded-xl bg-gray-50 px-3 py-2">
-                  <p className="text-lg font-black text-gray-950">{rewardState.availablePoints}</p>
-                  <p className="text-[10px] font-bold text-gray-400">可兑换</p>
-                </div>
-              </div>
-              <Link to="/profile" className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-gray-950 text-xs font-black text-white hover:bg-gray-800">
-                <Gift size={14} /> 奖励中心
-              </Link>
-            </section>
-          </div>
-        </aside>
-
-        <main className="min-w-0">
-          {children}
-        </main>
-      </div>
+      <main className="mx-auto max-w-6xl px-5 py-6">
+        {children}
+      </main>
     </div>
   )
 }
@@ -1246,6 +1317,7 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
   const profile = getProfile(data, cloud)
   const rewardState = getRewardState(data)
   const summary = stats(data)
+  const avatarInputRef = useRef(null)
   const [form, setForm] = useState({
     nickname: profile.nickname,
     avatarUrl: profile.avatarUrl,
@@ -1276,6 +1348,20 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
     })
     setMessage('已保存')
     window.setTimeout(() => setMessage(''), 1600)
+  }
+
+  async function handleAvatarFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    try {
+      const avatarUrl = await compressImageFile(file, { maxSize: 320, quality: 0.82 })
+      setForm((current) => ({ ...current, avatarUrl }))
+      setMessage('头像已读取，记得保存')
+    } catch (error) {
+      setMessage(error?.message || '头像读取失败')
+    }
   }
 
   return (
@@ -1313,15 +1399,28 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
               />
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-black text-gray-800">头像图片链接</span>
-              <input
-                value={form.avatarUrl}
-                onChange={(event) => setForm((current) => ({ ...current, avatarUrl: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
-                placeholder="https://..."
-              />
-            </label>
+            <div className="block">
+              <span className="mb-2 block text-sm font-black text-gray-800">头像图片</span>
+              <div className="flex h-11 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-black text-gray-700 hover:bg-gray-100"
+                >
+                  <Image size={16} /> 选择本机图片
+                </button>
+                {form.avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setForm((current) => ({ ...current, avatarUrl: '' }))}
+                    className="h-11 rounded-2xl bg-red-50 px-4 text-sm font-black text-red-600 hover:bg-red-100"
+                  >
+                    移除
+                  </button>
+                )}
+                <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarFile} className="hidden" />
+              </div>
+            </div>
 
             <label className="block">
               <span className="mb-2 block text-sm font-black text-gray-800">考试日期</span>
@@ -1467,6 +1566,7 @@ function PixelItemIcon({ name, earned }) {
 
 function LearningOverviewPanel({ data }) {
   const [now, setNow] = useState(() => Date.now())
+  const [selectedDateKey, setSelectedDateKey] = useState(() => todayKey())
   const activity = getActivity(data)
   const storedTodaySeconds = getTodaySiteSeconds(data)
   const liveBaseRef = useRef({ todaySeconds: storedTodaySeconds, siteSeconds: activity.siteSeconds, startedAt: now })
@@ -1481,22 +1581,27 @@ function LearningOverviewPanel({ data }) {
   }, [])
 
   const currentDate = new Date(now)
-  const endOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + 1)
   const liveElapsed = Math.floor((now - liveBaseRef.current.startedAt) / 1000)
   const liveTodaySeconds = liveBaseRef.current.todaySeconds + liveElapsed
   const liveSiteSeconds = liveBaseRef.current.siteSeconds + liveElapsed
   const calendarDays = getMonthCalendarDays(currentDate)
-  const activeDays = new Set(getActiveStudyDays(data))
+  const activityMap = getCalendarActivityMap(data)
   const chapterRows = getTopChapterTimeRows(data, 4)
   const maxChapterSeconds = Math.max(...chapterRows.map((row) => row.seconds), 1)
   const summary = stats(data)
+  const profile = getStoredProfile(data)
+  const goalSeconds = profile.dailyGoalMinutes * 60
   const todayFocusCount = getTodayFocusCount(data)
+  const selectedDetails = getDateStudyDetails(data, selectedDateKey)
+  const selectedActivity = activityMap.get(selectedDateKey) ?? { cards: 0, reviews: 0, logs: 0 }
+  const deckById = new Map(data.decks.map((deck) => [deck.id, deck]))
+  const countdownInfo = getCountdownInfo(data, now)
   const monthLabel = currentDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })
   const todayLabel = currentDate.toLocaleDateString('zh-CN', { weekday: 'short', month: '2-digit', day: '2-digit' })
 
   return (
     <section className="mb-5 overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
-      <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_300px]">
         <div className="border-b border-gray-100 p-5 lg:border-b-0 lg:border-r">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -1510,17 +1615,51 @@ function LearningOverviewPanel({ data }) {
           </div>
           <div className="mt-2 grid grid-cols-7 gap-1">
             {calendarDays.map((day) => {
-              const studied = activeDays.has(day.key)
+              const dayActivity = activityMap.get(day.key)
+              const active = Boolean(dayActivity?.cards || dayActivity?.reviews || dayActivity?.logs)
+              const selected = selectedDateKey === day.key
               return (
-                <div
+                <button
                   key={day.key}
-                  className={`relative grid h-8 place-items-center rounded-lg text-xs font-black ${day.isToday ? 'bg-[#007aff] text-white' : day.inMonth ? 'bg-gray-50 text-gray-700' : 'text-gray-300'}`}
+                  type="button"
+                  onClick={() => setSelectedDateKey(day.key)}
+                  title={`${getDateLabel(day.key)}：新增 ${dayActivity?.cards ?? 0}，复习 ${dayActivity?.reviews ?? 0}`}
+                  className={`relative grid h-8 place-items-center rounded-lg text-xs font-black transition-colors ${selected ? 'bg-gray-950 text-white' : day.isToday ? 'bg-[#007aff] text-white' : day.inMonth ? 'bg-gray-50 text-gray-700 hover:bg-gray-100' : 'text-gray-300 hover:bg-gray-50'}`}
                 >
                   {day.date.getDate()}
-                  {studied && <span className={`absolute bottom-1 h-1 w-1 rounded-full ${day.isToday ? 'bg-white' : 'bg-[#34c759]'}`} />}
-                </div>
+                  {active && <span className={`absolute bottom-1 h-1 w-1 rounded-full ${selected || day.isToday ? 'bg-white' : 'bg-[#34c759]'}`} />}
+                </button>
               )
             })}
+          </div>
+
+          <div className="mt-4 rounded-xl bg-gray-50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-xs font-black text-gray-800">{getDateLabel(selectedDateKey)}</p>
+              <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-black text-gray-400">
+                新增 {selectedActivity.cards} · 复习 {selectedActivity.reviews}
+              </span>
+            </div>
+            <div className="max-h-[150px] overflow-y-auto space-y-2">
+              {selectedDetails.cards.length === 0 && !selectedDetails.dailyLog?.content?.trim() && selectedDetails.reviews.length === 0 && (
+                <p className="py-4 text-center text-xs font-bold text-gray-400">这天还没有学习记录。</p>
+              )}
+              {selectedDetails.cards.slice(0, 4).map((card) => {
+                const deck = deckById.get(card.deckId)
+                return (
+                  <div key={card.id} className="rounded-lg bg-white px-3 py-2">
+                    <p className="line-clamp-1 text-xs font-black text-gray-800">{card.front}</p>
+                    <p className="mt-1 line-clamp-1 text-[11px] font-bold text-gray-400">{deck?.name ?? '未归档'} · 新增卡片</p>
+                  </div>
+                )
+              })}
+              {selectedDetails.dailyLog?.content?.trim() && (
+                <div className="rounded-lg bg-white px-3 py-2">
+                  <p className="text-xs font-black text-gray-800">今日复盘</p>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-500">{selectedDetails.dailyLog.content}</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1531,14 +1670,15 @@ function LearningOverviewPanel({ data }) {
               <h2 className="mt-1 text-2xl font-black text-gray-950">{todayLabel}</h2>
             </div>
             <div className="rounded-xl bg-gray-950 px-4 py-3 text-right text-white">
-              <p className="text-[11px] font-black text-white/50">今日倒计时</p>
-              <p className="mt-1 font-mono text-2xl font-black">{formatCountdown(endOfDay.getTime() - now)}</p>
+              <p className="text-[11px] font-black text-white/50">{countdownInfo.label}</p>
+              <p className="mt-1 font-mono text-2xl font-black">{countdownInfo.value}</p>
+              <p className="mt-1 text-[10px] font-bold text-white/40">{countdownInfo.detail}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {[
-              { label: '今日停留', value: formatDuration(liveTodaySeconds, true), detail: `累计 ${formatDuration(liveSiteSeconds, true)}`, icon: Target },
+              { label: '今日停留', value: formatDuration(liveTodaySeconds, true), detail: `目标 ${Math.round(Math.min(100, (liveTodaySeconds / Math.max(goalSeconds, 1)) * 100))}%`, icon: Target },
               { label: '专注次数', value: todayFocusCount, detail: `累计 ${activity.focusSessions}`, icon: Brain },
               { label: '掌握知识点', value: summary.mastered, detail: `${summary.learned}/${data.cards.length} 已学`, icon: BookOpen },
               { label: '今日到期', value: summary.dueToday, detail: '待复习卡片', icon: Layers3 },
@@ -1562,13 +1702,13 @@ function LearningOverviewPanel({ data }) {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-300">Chapter Time</p>
-              <h2 className="mt-1 text-lg font-black text-gray-950">章节耗时</h2>
+              <h2 className="mt-1 text-lg font-black text-gray-950">学习页专注耗时</h2>
             </div>
             <span className="rounded-lg bg-purple-50 px-2 py-1 text-[11px] font-black text-purple-700">{chapterRows.length || 0} 项</span>
           </div>
 
           <div className="space-y-3">
-            {chapterRows.length === 0 && <p className="rounded-xl bg-gray-50 px-4 py-5 text-sm font-bold text-gray-400">进入学习页后会自动累计章节耗时。</p>}
+            {chapterRows.length === 0 && <p className="rounded-xl bg-gray-50 px-4 py-5 text-sm font-bold text-gray-400">只在学习页且最近有操作时累计。</p>}
             {chapterRows.map((row) => (
               <div key={row.key}>
                 <div className="mb-1.5 flex items-center justify-between gap-3 text-xs font-black">
@@ -2714,6 +2854,7 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
   const [statusMessage, setStatusMessage] = useState('')
   const frontRef = useRef(null)
   const backRef = useRef(null)
+  const imageFileInputRef = useRef(null)
   const activeEditorFieldRef = useRef('back')
   const [activeEditorField, setActiveEditorField] = useState('back')
 
@@ -2832,13 +2973,28 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
     setSelectionText(field, next, start, start + lines.join('\n').length)
   }
 
-  function insertMedia(kind) {
-    const url = window.prompt(kind === 'image' ? '输入图片 URL' : '输入视频 URL')
+  function insertVideoLink() {
+    const url = window.prompt('输入视频 URL')
     if (!url?.trim()) return
-    const label = window.prompt(kind === 'image' ? '图片说明' : '视频标题')?.trim() || (kind === 'image' ? '图片' : '视频')
-    const snippet = kind === 'image' ? `![${label}](${url.trim()})` : `[${label}](${url.trim()})`
+    const label = window.prompt('视频标题')?.trim() || '视频'
+    const snippet = `[${label}](${url.trim()})`
     insertIntoField(getActiveEditorField(), snippet, '', '')
-    setStatusMessage(kind === 'image' ? '已插入图片 Markdown' : '已插入视频链接')
+    setStatusMessage('已插入视频链接')
+  }
+
+  async function handleImageFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    try {
+      const imageUrl = await compressImageFile(file, { maxSize: 1000, quality: 0.76 })
+      const label = file.name.replace(/\.[^.]+$/, '') || '图片'
+      insertIntoField(getActiveEditorField(), `![${label}](${imageUrl})`, '', '')
+      setStatusMessage('已插入本机图片')
+    } catch (error) {
+      setStatusMessage(error?.message || '图片读取失败')
+    }
   }
 
   function applyEditorTool(tool) {
@@ -2850,8 +3006,8 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
       strike: () => insertIntoField(field, '~~', '~~', '删除线内容'),
       list: () => insertLinePrefix('- '),
       ordered: () => insertLinePrefix('', true),
-      image: () => insertMedia('image'),
-      video: () => insertMedia('video'),
+      image: () => imageFileInputRef.current?.click(),
+      video: () => insertVideoLink(),
       align: () => {
         const nextAlign = form.align === 'left' ? 'center' : form.align === 'center' ? 'right' : 'left'
         updateForm('align', nextAlign)
@@ -2987,6 +3143,7 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
                     <Icon size={16} />
                   </button>
                 ))}
+                <input ref={imageFileInputRef} type="file" accept="image/*" onChange={handleImageFile} className="hidden" />
                 <button type="button" onClick={() => setShowMoreTools((current) => !current)} title={showMoreTools ? '收起更多工具' : '更多'} aria-pressed={showMoreTools} className="ml-auto w-8 h-8 flex items-center justify-center hover:bg-gray-100 hover:text-gray-700 rounded-lg">
                   <MoreVertical size={16} />
                 </button>
@@ -3512,6 +3669,8 @@ export default function App() {
   const cloud = useCloudSync(data, setData)
   const studyDeckId = data.decks[0]?.id ?? null
   const focusSessionRef = useRef(null)
+  const lastActiveAtRef = useRef(Date.now())
+  const lastActivityTickAtRef = useRef(Date.now())
   const activeStudyDeckId = useMemo(() => {
     const match = location.pathname.match(/^\/study\/([^/]+)/)
     return match?.[1] ?? null
@@ -3532,11 +3691,30 @@ export default function App() {
   }, [activeStudyDeckId])
 
   useEffect(() => {
+    function markActive() {
+      lastActiveAtRef.current = Date.now()
+    }
+
+    const events = ['pointerdown', 'keydown', 'scroll', 'touchstart']
+    events.forEach((eventName) => window.addEventListener(eventName, markActive, { passive: true }))
+    return () => events.forEach((eventName) => window.removeEventListener(eventName, markActive))
+  }, [])
+
+  useEffect(() => {
+    lastActivityTickAtRef.current = Date.now()
+  }, [activeStudyDeckId])
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
+      const tickedAt = Date.now()
+      const deltaSeconds = Math.max(1, Math.min(ACTIVITY_TICK_SECONDS, Math.floor((tickedAt - lastActivityTickAtRef.current) / 1000)))
+      lastActivityTickAtRef.current = tickedAt
+      if (tickedAt - lastActiveAtRef.current > ACTIVITY_IDLE_TIMEOUT_MS) return
+
       setData((current) => {
         const trackedDeckId = activeStudyDeckId && current.decks.some((deck) => deck.id === activeStudyDeckId) ? activeStudyDeckId : null
-        return addActivitySeconds(current, ACTIVITY_TICK_SECONDS, trackedDeckId)
+        return addActivitySeconds(current, deltaSeconds, trackedDeckId)
       })
     }, ACTIVITY_TICK_SECONDS * 1000)
 
