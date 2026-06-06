@@ -1,5 +1,9 @@
-﻿import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import ToolbarButton from './components/ToolbarButton.jsx'
+import PixelItemIcon from './components/PixelItemIcon.jsx'
+import CollapseToggle from './components/CollapseToggle.jsx'
+import CardContent from './components/CardContent.jsx'
 import { motion } from 'framer-motion'
 import DOMPurify from 'dompurify'
 import {
@@ -74,6 +78,7 @@ const BROWSE_CARD_RENDER_LIMIT = 48
 const BUILTIN_DYL_PACK_ID = 'dyl-exam'
 const BUILTIN_DYL_DATA_URL = '/bundles/dyl-exam/data.json'
 const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
+const SHELL_WIDTH_STORAGE_KEY = `${STORAGE_KEY}:shellWidth`
 const ThemeContext = createContext({ theme: 'light', toggleTheme: () => {} })
 const STUDY_GRADE_OPTIONS = [
   {
@@ -113,160 +118,7 @@ const STUDY_GRADE_OPTIONS = [
     badgeClass: 'bg-blue-100 text-blue-700',
   },
 ]
-const PIXEL_ITEM_BADGES = {
-  card: {
-    palette: { d: '#244938', g: '#34c759', l: '#9ff2b1', y: '#f9d96b', w: '#fff7d6' },
-    pixels: ['...........', '..ddddddd..', '.dgggggggd.', '.dglgglggd.', '.dgggggggd.', '.dggdddggd.', '.dgggggggd.', '.dglgglggd.', '.dgggggggd.', '..ddddddd..', '...........'],
-  },
-  calendar: {
-    palette: { d: '#23384f', s: '#63b3ed', l: '#d8f3ff', r: '#ff6b6b', w: '#ffffff', y: '#fde047' },
-    pixels: ['...........', '...r...r...', '..ddddddd..', '.dsssssssd.', '.dslssslsd.', '.dsssssssd.', '.dsllyllsd.', '.dsssssssd.', '.dsssssssd.', '..ddddddd..', '...........'],
-  },
-  review: {
-    palette: { d: '#4a3424', r: '#ef4444', y: '#fde68a', b: '#38bdf8', w: '#fff7d6' },
-    pixels: ['.....d.....', '...ddddd...', '..dwwwwwd..', '.dwwrwwwd..', '.dwwrrwwd..', 'dwwwwywwwd.', '.dwwbbwwd..', '.dwwwbwwd..', '..dwwwwwd..', '...ddddd...', '.....d.....'],
-  },
-  note: {
-    palette: { d: '#4b2f5f', p: '#c084fc', l: '#f3e8ff', y: '#facc15', w: '#ffffff' },
-    pixels: ['...........', '..dd...dd..', '.dppdddppd.', '.dpppppppd.', '.dplllpppd.', '.dpppppppd.', '.dplllpppd.', '.dpppppppd.', '.dppdddppd.', '..dd...dd..', '...........'],
-  },
-  link: {
-    palette: { d: '#164e63', c: '#22d3ee', l: '#a5f3fc', w: '#ecfeff' },
-    pixels: ['...........', '..dddd.....', '.dccccd....', 'dcc...ccd..', 'dcc...ccd..', '.dccccd....', '...dddd....', '....dccccd.', '..dcc...ccd', '..dcc...ccd', '....dddd...'],
-  },
-  folder: {
-    palette: { d: '#5b3718', b: '#a16207', y: '#fbbf24', l: '#fde68a', k: '#3f2a16' },
-    pixels: ['...........', '...ddddd...', '..dyyyyyd..', '.dyyyyyyyd.', '.dllllllld.', '.dbbbbbbbd.', '.dbbbybbbd.', '.dbbbybbbd.', '.dbbbbbbbd.', '..ddddddd..', '...kkkkk...'],
-  },
-  flame: {
-    palette: { d: '#4b1d1d', r: '#ef4444', o: '#f97316', y: '#fde047', b: '#7c2d12' },
-    pixels: ['.....r.....', '....ror....', '...royor...', '...royyo...', '..royyyor..', '.droyyyord.', '.droyoyord.', '..dorrodd..', '...dbbbd...', '...dbbbd...', '....ddd....'],
-  },
-  focus: {
-    palette: { d: '#213547', b: '#3b82f6', c: '#93c5fd', w: '#f8fafc', y: '#facc15' },
-    pixels: ['..d.....d..', '....ddd....', '...dbbbd...', '..dbbbbbd..', '..dbcbcbd..', '.dbbbbbbbd.', '.dbbbbbbbd.', '..ddddddd..', '..dyyyyd...', '....dyd....', '...........'],
-  },
-  timer: {
-    palette: { d: '#2f2a3f', p: '#a78bfa', l: '#ddd6fe', w: '#ffffff', g: '#34c759' },
-    pixels: ['...........', '..ddddddd..', '...dwwwd...', '...dwlwd...', '....dld....', '.....d.....', '....dgd....', '...dglgd...', '...dgggd...', '..ddddddd..', '...........'],
-  },
-}
-const ACHIEVEMENTS = [
-  {
-    id: 'first-card',
-    title: '知识绿砖',
-    description: '铸出第 1 块知识砖',
-    points: 10,
-    icon: 'card',
-    color: '#34c759',
-    isEarned: (data) => data.cards.length >= 1,
-    progress: (data) => `${Math.min(data.cards.length, 1)}/1`,
-  },
-  {
-    id: 'daily-review',
-    title: '日历石碑',
-    description: '在今天立下一块复盘石碑',
-    points: 10,
-    icon: 'calendar',
-    color: '#007aff',
-    isEarned: (data) => Boolean(getDailyLog(data, todayKey())?.content?.trim()),
-    progress: (data) => (getDailyLog(data, todayKey())?.content?.trim() ? '1/1' : '0/1'),
-  },
-  {
-    id: 'first-review',
-    title: '复习罗盘',
-    description: '点亮第 1 次复习评分',
-    points: 15,
-    icon: 'review',
-    color: '#ff9f0a',
-    isEarned: (data) => getReviewLogs(data).length >= 1,
-    progress: (data) => `${Math.min(getReviewLogs(data).length, 1)}/1`,
-  },
-  {
-    id: 'first-note',
-    title: '批注卷轴',
-    description: '写下第 1 条理解批注',
-    points: 10,
-    icon: 'note',
-    color: '#af52de',
-    isEarned: (data) => getCardAnnotationCount(data) >= 1,
-    progress: (data) => `${Math.min(getCardAnnotationCount(data), 1)}/1`,
-  },
-  {
-    id: 'first-link',
-    title: '线索锁链',
-    description: '把 2 张相关卡片扣成一环',
-    points: 15,
-    icon: 'link',
-    color: '#5ac8fa',
-    isEarned: (data) => getLinkedPairCount(data) >= 1,
-    progress: (data) => `${Math.min(getLinkedPairCount(data), 1)}/1`,
-  },
-  {
-    id: 'first-folder',
-    title: '归档宝箱',
-    description: '把 1 个卡组放进板块宝箱',
-    points: 10,
-    icon: 'folder',
-    color: '#5856d6',
-    isEarned: (data) => data.decks.some((deck) => getDeckSection(deck) !== UNGROUPED_SECTION),
-    progress: (data) => `${Math.min(data.decks.filter((deck) => getDeckSection(deck) !== UNGROUPED_SECTION).length, 1)}/1`,
-  },
-  {
-    id: 'three-days',
-    title: '三日营火',
-    description: '连续点起 3 天学习火光',
-    points: 20,
-    icon: 'flame',
-    color: '#ff3b30',
-    isEarned: (data) => getActiveStudyDays(data).length >= 3,
-    progress: (data) => `${Math.min(getActiveStudyDays(data).length, 3)}/3`,
-  },
-  {
-    id: 'first-focus',
-    title: '专注初响',
-    description: '开启第 1 次学习专注',
-    points: 10,
-    icon: 'focus',
-    color: '#007aff',
-    isEarned: (data) => getActivity(data).focusSessions >= 1,
-    progress: (data) => `${Math.min(getActivity(data).focusSessions, 1)}/1`,
-  },
-  {
-    id: 'chapter-clock',
-    title: '章节沙漏',
-    description: '任一章节累计学习 10 分钟',
-    points: 20,
-    icon: 'timer',
-    color: '#af52de',
-    isEarned: (data) => getTopChapterTimeRows(data, 1).some((row) => row.seconds >= CHAPTER_MILESTONE_SECONDS),
-    progress: (data) => `${Math.min(Math.floor((getTopChapterTimeRows(data, 1)[0]?.seconds ?? 0) / 60), 10)}/10 分钟`,
-  },
-]
 
-const REWARD_OPTIONS = [
-  {
-    id: 'focus-pass',
-    title: '专注通行证',
-    description: '给今天的学习页解锁一枚专注徽章。',
-    cost: 20,
-    badge: 'Focus',
-  },
-  {
-    id: 'profile-frame',
-    title: '学习贴纸',
-    description: '在个人页标记一枚已兑换学习贴纸。',
-    cost: 40,
-    badge: 'Sticker',
-  },
-  {
-    id: 'vip-week',
-    title: '会员体验券',
-    description: '预留给后续高级功能的 7 天体验资格。',
-    cost: 80,
-    badge: 'VIP',
-  },
-]
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -599,72 +451,6 @@ function findBestScopeNodeForDeck(scopeNodes, deckId) {
     .sort((a, b) => b.depth - a.depth)[0] ?? null
 }
 
-function getCardSideHtml(card, side) {
-  return side === 'front' ? card?.frontHtml : card?.backHtml
-}
-
-function getCardSideText(card, side) {
-  return side === 'front' ? card?.front : card?.back
-}
-
-function looksLikeHtml(value = '') {
-  return /<\/?[a-z][\s\S]*>/i.test(String(value))
-}
-
-function htmlToPlainText(html = '') {
-  if (typeof document === 'undefined') return String(html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-  const element = document.createElement('div')
-  element.innerHTML = String(html)
-  return (element.textContent || element.innerText || '').replace(/\s+/g, ' ').trim()
-}
-
-function sanitizeCssScopeId(value = '') {
-  return String(value).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80) || 'card'
-}
-
-function scopeAnkiCss(css = '', scopeSelector = '.anki-card-content') {
-  const cleanCss = stripSelectionBlockingStylesFromCss(
-    String(css)
-      .replace(/<\/?style[^>]*>/gi, '')
-      .replace(/@import[^;]+;/gi, ''),
-  ).trim()
-
-  if (!cleanCss) return ''
-
-  return cleanCss.replace(/(^|})\s*([^@{}][^{}]*)\{/g, (match, boundary, selectorText) => {
-    const scopedSelectors = selectorText
-      .split(',')
-      .map((selector) => selector.trim())
-      .filter(Boolean)
-      .map((selector) => {
-        if (/^(?:from|to|\d+(?:\.\d+)?%)$/i.test(selector)) return selector
-        if (/^(?:html|body|\.card|#qa|#content)$/i.test(selector)) return scopeSelector
-        if (selector.startsWith(scopeSelector)) return selector
-        return `${scopeSelector} ${selector}`
-      })
-      .join(', ')
-
-    return scopedSelectors ? `${boundary} ${scopedSelectors} {` : match
-  })
-}
-
-function sanitizeCardHtml(html) {
-  const normalizedHtml = String(html ?? '')
-    .replace(/<!doctype[^>]*>/gi, '')
-    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
-    .replace(/<\/?(?:template|html|body)[^>]*>/gi, '')
-  const safeHtml = DOMPurify.sanitize(normalizedHtml, {
-    ADD_TAGS: ['audio', 'video', 'source'],
-    ADD_ATTR: ['alt', 'class', 'colspan', 'controls', 'decoding', 'height', 'href', 'loading', 'rel', 'rowspan', 'src', 'style', 'target', 'title', 'width'],
-  })
-  return makeHtmlTextSelectable(safeHtml)
-    .replace(/<img\b(?![^>]*\bloading=)/gi, '<img loading="lazy"')
-    .replace(/<img\b(?![^>]*\bdecoding=)/gi, '<img decoding="async"')
-}
-
-function isScriptCallText(value = '') {
-  return /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i.test(String(value ?? '').replace(/\s+/g, ' ').trim())
-}
 
 function compactCardText(value = '', maxLength = 180) {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim()
@@ -676,41 +462,6 @@ function getCardHtmlSections(card) {
   return Array.isArray(card?.htmlSections)
     ? card.htmlSections.filter((section) => section?.id && section?.label && (section.html || section.text))
     : []
-}
-
-function CardContent({ card, side, className = '', fallbackClassName = '', placeholder = '', htmlOverride = '', textOverride = '' }) {
-  const explicitHtml = htmlOverride || getCardSideHtml(card, side)
-  const rawText = textOverride || getCardSideText(card, side) || placeholder
-  const text = side === 'front' ? (stripAnswerSectionFromText(rawText) || rawText) : rawText
-  const html = explicitHtml || (card?.template === 'html' && looksLikeHtml(text) ? text : '')
-  const fallbackText = isScriptCallText(text)
-    ? '这张 Anki 卡依赖脚本或加密模板，无法直接显示。请删除后用新版导入重新尝试。'
-    : text
-
-  if (html) {
-    const safeHtml = side === 'front'
-      ? stripAnswerSectionFromHtml(sanitizeCardHtml(html))
-      : sanitizeCardHtml(html)
-    const hasRenderableHtml = Boolean(safeHtml.trim())
-    const scopeId = sanitizeCssScopeId(`${card?.id ?? 'preview'}-${side}`)
-    const scopedCss = scopeAnkiCss(card?.cardCss, `[data-anki-card="${scopeId}"]`)
-
-    if (hasRenderableHtml) {
-      return (
-        <>
-          {scopedCss && <style>{scopedCss}</style>}
-          <div
-            data-anki-card={scopeId}
-            className={`anki-card-content ${className}`}
-            style={{ contentVisibility: 'auto', containIntrinsicSize: '520px' }}
-            dangerouslySetInnerHTML={{ __html: safeHtml }}
-          />
-        </>
-      )
-    }
-  }
-
-  return <p className={fallbackClassName || className}>{fallbackText}</p>
 }
 
 const SYSTEM_CARD_TEMPLATES = [
@@ -1400,20 +1151,6 @@ function parseDailyReview(content) {
   }
 }
 
-function getAchievementState(data) {
-  const items = ACHIEVEMENTS.map((achievement) => ({
-    ...achievement,
-    earned: achievement.isEarned(data),
-    progressText: achievement.progress(data),
-  }))
-
-  return {
-    items,
-    earnedItems: items.filter((achievement) => achievement.earned),
-    totalPoints: items.filter((achievement) => achievement.earned).reduce((sum, achievement) => sum + achievement.points, 0),
-    maxPoints: items.reduce((sum, achievement) => sum + achievement.points, 0),
-  }
-}
 
 function getStoredProfile(data) {
   const profile = data?.profile && typeof data.profile === 'object' ? data.profile : {}
@@ -1467,29 +1204,6 @@ function formatCompactSyncTime(timestamp) {
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-function ToolbarButton({ to, icon: Icon, label, disabled = false }) {
-  const baseClass = 'h-9 px-3 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors'
-
-  if (disabled) {
-    return (
-      <span className={`${baseClass} text-gray-300 cursor-not-allowed`}>
-        <Icon size={16} />
-        {label}
-      </span>
-    )
-  }
-
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) => `${baseClass} ${isActive ? 'bg-white text-[#007aff] shadow-sm' : 'text-gray-500 hover:bg-white/70 hover:text-gray-900'}`}
-    >
-      <Icon size={16} />
-      {label}
-    </NavLink>
-  )
 }
 
 function DeckDialog({ open, mode, initialValue, existingNames, onClose, onSubmit }) {
@@ -1792,6 +1506,10 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
       : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
+  const [shellWidth, setShellWidth] = useState(() => {
+    try { return localStorage.getItem(SHELL_WIDTH_STORAGE_KEY) || (wide ? "wide" : "normal") }
+    catch { return wide ? "wide" : "normal" }
+  })
   const isDarkTheme = theme === 'dark'
 
   const navItems = [
@@ -1813,7 +1531,7 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
     <div className="min-h-screen bg-[#f5f5f7] text-gray-950 font-sans">
       <AuthDialog open={authDialogOpen} cloud={cloud} onClose={() => setAuthDialogOpen(false)} />
       <header className="sticky top-0 z-40 border-b border-white/70 bg-[#f5f5f7]/90 backdrop-blur-xl">
-        <div className={`mx-auto flex ${wide ? 'max-w-[1400px]' : 'max-w-6xl'} items-center justify-between gap-4 px-5 py-3`}>
+        <div className={`mx-auto flex ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} items-center justify-between gap-4 px-5 py-3`}>
           <Link to="/decks" className="flex items-center gap-3 text-sm font-black text-gray-950">
             <span className="brand-logo" aria-label="mik!">
               <span className="brand-letter brand-letter-m">m</span>
@@ -1853,6 +1571,7 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
                 className="grid h-8 w-8 place-items-center rounded-xl text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
               >
                 {isDarkTheme ? <Sun size={14} /> : <Moon size={14} />}
+              <button type="button" onClick={() => { const presets = wide ? ["narrow","wide","full"] : ["narrow","normal","full"]; const idx = presets.indexOf(shellWidth); const next = presets[(idx + 1) % presets.length]; setShellWidth(next); try { localStorage.setItem(SHELL_WIDTH_STORAGE_KEY, next) } catch {} }} title={`宽度：${shellWidth === "narrow" ? "窄" : shellWidth === "full" ? "全宽" : "默认"} → 点此切换`} className="grid h-8 w-8 place-items-center rounded-xl text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"> <Maximize2 size={14} /> </button>
               </button>
             {cloud.enabled && cloud.user ? (
               <button
@@ -1891,14 +1610,14 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
           </div>
         </div>
 
-        <nav className={`mx-auto flex ${wide ? 'max-w-[1400px]' : 'max-w-6xl'} gap-2 overflow-x-auto px-5 pb-3 lg:hidden`}>
+        <nav className={`mx-auto flex ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} gap-2 overflow-x-auto px-5 pb-3 lg:hidden`}>
           {navItems.map((item) => (
             <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
           ))}
         </nav>
       </header>
 
-      <main className={`mx-auto ${wide ? 'max-w-[1400px]' : 'max-w-6xl'} px-5 py-6`}>
+      <main className={`mx-auto ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} px-5 py-6`}>
         {children}
       </main>
     </div>
@@ -2181,44 +1900,6 @@ function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) 
   )
 }
 
-function PixelItemIcon({ name, earned }) {
-  const badge = PIXEL_ITEM_BADGES[name] ?? PIXEL_ITEM_BADGES.card
-  const rows = badge.pixels
-  const palette = earned ? badge.palette : {
-    d: '#9ca3af',
-    g: '#d1d5db',
-    l: '#f3f4f6',
-    y: '#e5e7eb',
-    w: '#f9fafb',
-    b: '#d1d5db',
-    r: '#d1d5db',
-    o: '#e5e7eb',
-    p: '#d1d5db',
-    c: '#e5e7eb',
-    k: '#9ca3af',
-  }
-
-  return (
-    <div className={`grid h-16 w-16 shrink-0 place-items-center border-2 border-gray-900 bg-[#1f2937] p-1 shadow-[4px_4px_0_#d1d5db] ${earned ? '' : 'opacity-70'}`} aria-hidden="true">
-      <div
-        className="grid gap-0"
-        style={{
-          gridTemplateColumns: `repeat(${rows[0].length}, 5px)`,
-          imageRendering: 'pixelated',
-        }}
-      >
-        {rows.join('').split('').map((pixel, index) => (
-          <span
-            key={`${name}-${index}`}
-            className="h-[5px] w-[5px]"
-            style={{ backgroundColor: pixel === '.' ? 'transparent' : palette[pixel] }}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function LearningOverviewPanel({ data }) {
   const [now, setNow] = useState(() => Date.now())
   const [selectedDateKey, setSelectedDateKey] = useState(null)
@@ -2402,19 +2083,6 @@ function LearningOverviewPanel({ data }) {
   )
 }
 
-function CollapseToggle({ expanded, onToggle, label }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={expanded}
-      title={expanded ? `收起${label}` : `展开${label}`}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-    >
-      <ChevronRight size={16} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
-    </button>
-  )
-}
 
 function AchievementPanel({ data, collapsed = false, onToggle }) {
   const achievementState = getAchievementState(data)
@@ -2951,6 +2619,8 @@ function BrowseWorktable({
   const [contextMenu, setContextMenu] = useState(null)
   const [previewCardId, setPreviewCardId] = useState(null)
   const [previewPending, setPreviewPending] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(BROWSE_CARD_RENDER_LIMIT)
+  const loadMoreSentinelRef = useRef(null)
   const initializedScopeRef = useRef(false)
 
   const scopeTree = useMemo(() => buildBrowseScopeTree(data), [data])
@@ -3002,7 +2672,7 @@ function BrowseWorktable({
         return `${card.front} ${card.back} ${sectionText} ${scopeText} ${deck ? getDeckOptionLabel(deck) : ''}`.toLowerCase().includes(normalizedQuery)
       })
   ), [browseDeckById, cardFilter, flagColorFilter, normalizedQuery, selectedScopeCards])
-  const visibleCardRows = useMemo(() => visibleCards.slice(0, BROWSE_CARD_RENDER_LIMIT), [visibleCards])
+  const visibleCardRows = useMemo(() => visibleCards.slice(0, visibleCount), [visibleCards, visibleCount])
   const visibleCardIdSet = useMemo(() => new Set(visibleCards.map((card) => card.id)), [visibleCards])
   const selectedCard = selectedCardId && visibleCardIdSet.has(selectedCardId)
     ? browseCardById.get(selectedCardId)
@@ -3051,6 +2721,22 @@ function BrowseWorktable({
   useEffect(() => {
     if (selectedCard?.deckId) setSelectedDeckId(selectedCard.deckId)
   }, [selectedCard?.deckId, selectedCard?.id])
+
+  useEffect(() => {
+    setVisibleCount(BROWSE_CARD_RENDER_LIMIT)
+  }, [visibleCards])
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && visibleCount < visibleCards.length) {
+        setVisibleCount((current) => Math.min(current + 24, visibleCards.length))
+      }
+    }, { rootMargin: "160px" })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [visibleCount, visibleCards.length])
 
   useEffect(() => {
     function closeMenu() {
@@ -3376,6 +3062,7 @@ function BrowseWorktable({
                       </div>
                     </article>
                 ))}
+              <div ref={loadMoreSentinelRef} className="h-px" />
               </div>
               {visibleCards.length > visibleCardRows.length && (
                 <p className="px-3 py-4 text-center text-xs font-bold text-gray-400">已显示前 {visibleCardRows.length} 张，继续搜索可以缩小范围。</p>
