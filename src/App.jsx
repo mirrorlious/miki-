@@ -69,7 +69,7 @@ const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对
 const ACTIVITY_TICK_SECONDS = 10
 const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
-const BROWSE_CARD_RENDER_LIMIT = 300
+const BROWSE_CARD_RENDER_LIMIT = 96
 const BUILTIN_DYL_PACK_ID = 'dyl-exam'
 const BUILTIN_DYL_DATA_URL = '/bundles/dyl-exam/data.json'
 const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
@@ -470,11 +470,11 @@ function getCardLinks(card) {
 }
 
 const FLAG_COLOR_OPTIONS = [
-  { value: 'red', label: '红旗' },
-  { value: 'orange', label: '橙旗' },
-  { value: 'green', label: '绿旗' },
-  { value: 'blue', label: '蓝旗' },
-  { value: 'purple', label: '紫旗' },
+  { value: 'red', label: '红旗', menuLabel: '红色' },
+  { value: 'orange', label: '橙旗', menuLabel: '橙色' },
+  { value: 'green', label: '绿旗', menuLabel: '绿色' },
+  { value: 'blue', label: '蓝旗', menuLabel: '蓝色' },
+  { value: 'purple', label: '紫旗', menuLabel: '紫色' },
 ]
 
 function getCardFlagColor(card) {
@@ -493,6 +493,14 @@ function getFlagColorClass(color, active = true) {
   if (color === 'blue') return 'bg-blue-50 text-blue-600'
   if (color === 'purple') return 'bg-purple-50 text-purple-600'
   return 'bg-red-50 text-red-500'
+}
+
+function getFlagColorTextClass(color) {
+  if (color === 'orange') return 'text-orange-500'
+  if (color === 'green') return 'text-green-600'
+  if (color === 'blue') return 'text-blue-600'
+  if (color === 'purple') return 'text-purple-600'
+  return 'text-red-500'
 }
 
 function getCardScopeParts(card, deckById) {
@@ -2844,6 +2852,8 @@ function BrowseWorktable({
   const scopeTree = useMemo(() => buildBrowseScopeTree(data), [data])
   const scopeNodes = useMemo(() => flattenScopeTree(scopeTree), [scopeTree])
   const scopeNodeMap = useMemo(() => new Map(scopeNodes.map((node) => [node.key, node])), [scopeNodes])
+  const browseDeckById = useMemo(() => new Map(data.decks.map((deck) => [deck.id, deck])), [data.decks])
+  const browseCardById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const selectedScope = scopeNodeMap.get(selectedScopeKey) ?? scopeTree
   const selectedScopeCardIds = useMemo(() => new Set(selectedScope.cardIds), [selectedScope])
   const selectedScopeCards = useMemo(() => (
@@ -2870,6 +2880,7 @@ function BrowseWorktable({
     })
   }, [selectedScope.parts])
 
+  const normalizedQuery = query.trim().toLowerCase()
   const visibleCards = useMemo(() => (
     selectedScopeCards
       .filter((card) => {
@@ -2879,28 +2890,27 @@ function BrowseWorktable({
       })
       .filter((card) => flagColorFilter === 'all' || getCardFlagColor(card) === flagColorFilter)
       .filter((card) => {
-        const keyword = query.trim().toLowerCase()
-        if (!keyword) return true
-        const deck = data.decks.find((item) => item.id === card.deckId)
+        if (!normalizedQuery) return true
+        const deck = browseDeckById.get(card.deckId)
         const sectionText = getCardHtmlSections(card).map((section) => section.text).join(' ')
-        const scopeText = getCardScopeParts(card, new Map(data.decks.map((item) => [item.id, item]))).join(' ')
-        return `${card.front} ${card.back} ${sectionText} ${scopeText} ${deck ? getDeckOptionLabel(deck) : ''}`.toLowerCase().includes(keyword)
+        const scopeText = getCardScopeParts(card, browseDeckById).join(' ')
+        return `${card.front} ${card.back} ${sectionText} ${scopeText} ${deck ? getDeckOptionLabel(deck) : ''}`.toLowerCase().includes(normalizedQuery)
       })
-  ), [cardFilter, data.decks, flagColorFilter, query, selectedScopeCards])
+  ), [browseDeckById, cardFilter, flagColorFilter, normalizedQuery, selectedScopeCards])
   const visibleCardRows = useMemo(() => visibleCards.slice(0, BROWSE_CARD_RENDER_LIMIT), [visibleCards])
   const selectedCard = visibleCards.find((card) => card.id === selectedCardId) ?? visibleCards[0] ?? null
-  const selectedDeck = data.decks.find((deck) => deck.id === (selectedCard?.deckId ?? selectedDeckId))
+  const selectedDeck = browseDeckById.get(selectedCard?.deckId ?? selectedDeckId)
   const selectedAnnotations = getCardAnnotations(selectedCard)
-  const linkedCards = selectedCard ? getCardLinks(selectedCard).map((id) => data.cards.find((card) => card.id === id)).filter(Boolean) : []
+  const linkedCards = selectedCard ? getCardLinks(selectedCard).map((id) => browseCardById.get(id)).filter(Boolean) : []
   const relatedSuggestions = getRelatedSuggestions(data, selectedCard)
   const linkableCards = data.cards.filter((card) => card.id !== selectedCard?.id && !getCardLinks(selectedCard).includes(card.id))
   const selectedScopeDeckId = selectedCard?.deckId ?? scopeDeckIds[0] ?? selectedDeckId ?? data.decks[0]?.id ?? ''
-  const contextCard = contextMenu?.type === 'card' ? data.cards.find((card) => card.id === contextMenu.cardId) : null
+  const contextCard = contextMenu?.type === 'card' ? browseCardById.get(contextMenu.cardId) : null
   const contextScope = contextMenu?.type === 'scope' ? scopeNodeMap.get(contextMenu.scopeKey) : null
-  const contextDecks = contextScope ? contextScope.deckIds.map((id) => data.decks.find((deck) => deck.id === id)).filter(Boolean) : []
+  const contextDecks = contextScope ? contextScope.deckIds.map((id) => browseDeckById.get(id)).filter(Boolean) : []
   const editableContextDecks = contextDecks.filter((deck) => !isBuiltinDylItem(deck))
   const contextTargetDeckId = contextCard?.deckId
-    ?? (contextScope?.cardIds?.[0] ? data.cards.find((card) => card.id === contextScope.cardIds[0])?.deckId : '')
+    ?? (contextScope?.cardIds?.[0] ? browseCardById.get(contextScope.cardIds[0])?.deckId : '')
     ?? contextScope?.deckIds?.[0]
     ?? selectedScopeDeckId
 
@@ -2974,11 +2984,88 @@ function BrowseWorktable({
   }
 
   function setCardFlagColor(card, color) {
-    onUpdateCardMeta?.(card.id, { flagged: Boolean(color), flagColor: color || '' })
+    const nextColor = color || ''
+    onUpdateCardMeta?.(card.id, { flagged: Boolean(nextColor), flagColor: nextColor })
+    if (!nextColor && cardFilter === 'flagged') {
+      setCardFilter('all')
+    }
+    if (flagColorFilter !== 'all' && (!nextColor || nextColor !== flagColorFilter)) {
+      setFlagColorFilter('all')
+    }
   }
 
   function toggleCardFavorite(card) {
     onUpdateCardMeta?.(card.id, { favorite: !card.favorite })
+  }
+
+  function renderFavoriteControl(card, size = 'sm') {
+    const isLarge = size === 'lg'
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          toggleCardFavorite(card)
+        }}
+        className={`grid shrink-0 place-items-center ${isLarge ? 'h-8 w-8 rounded-lg' : 'h-6 w-6 rounded-md'} ${card.favorite ? 'bg-yellow-50 text-yellow-500' : 'text-gray-300 hover:bg-gray-100 hover:text-yellow-500'}`}
+        aria-label={card.favorite ? '取消星标' : '星标'}
+        title={card.favorite ? '取消星标' : '星标'}
+      >
+        <Star size={isLarge ? 16 : 14} fill={card.favorite ? 'currentColor' : 'none'} />
+      </button>
+    )
+  }
+
+  function renderFlagControl(card, size = 'sm') {
+    const flagColor = getCardFlagColor(card)
+    const isLarge = size === 'lg'
+    return (
+      <span
+        className="group relative inline-flex shrink-0"
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            setCardFlagColor(card, flagColor ? '' : 'red')
+          }}
+          className={`grid place-items-center ${isLarge ? 'h-8 w-8 rounded-lg' : 'h-6 w-6 rounded-md'} ${flagColor ? getFlagColorClass(flagColor) : 'text-gray-300 hover:bg-gray-100 hover:text-red-500'}`}
+          aria-label={flagColor ? '取消旗帜' : '添加旗帜'}
+          title={flagColor ? '点击取消旗帜，悬停可换颜色' : '点击添加红旗，悬停可选颜色'}
+        >
+          <Flag size={isLarge ? 16 : 14} fill={flagColor ? 'currentColor' : 'none'} />
+        </button>
+        <div className={`pointer-events-none absolute right-0 top-full z-40 mt-1 ${isLarge ? 'w-28' : 'w-24'} rounded-lg border border-gray-200 bg-white p-1 text-[11px] font-bold text-gray-600 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100`}>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              setCardFlagColor(card, '')
+            }}
+            className={`flex h-7 w-full items-center gap-2 rounded-md px-2 text-left ${flagColor ? 'hover:bg-gray-50' : 'bg-gray-100 text-gray-900'}`}
+          >
+            <Flag size={13} />
+            无色
+          </button>
+          {FLAG_COLOR_OPTIONS.map((color) => (
+            <button
+              key={color.value}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                setCardFlagColor(card, color.value)
+              }}
+              className={`flex h-7 w-full items-center gap-2 rounded-md px-2 text-left ${flagColor === color.value ? getFlagColorClass(color.value) : 'hover:bg-gray-50'}`}
+            >
+              <Flag size={13} fill="currentColor" className={getFlagColorTextClass(color.value)} />
+              {color.menuLabel}
+            </button>
+          ))}
+        </div>
+      </span>
+    )
   }
 
   function handleAddAnnotation() {
@@ -3073,7 +3160,7 @@ function BrowseWorktable({
         </div>
       </header>
 
-      <div className="grid min-h-[720px] grid-cols-1 gap-4 xl:grid-cols-[310px_minmax(0,1fr)_390px]">
+      <div className="grid min-h-[720px] grid-cols-1 justify-center gap-4 xl:grid-cols-[300px_390px_390px]">
         <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
           <div className="flex h-12 items-center justify-between border-b border-gray-200 px-4">
             <div>
@@ -3115,7 +3202,7 @@ function BrowseWorktable({
                 />
                 <span className="shrink-0 text-xs font-bold text-gray-400">{visibleCards.length} 张</span>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-black">
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs font-black">
                 {[
                   { value: 'all', label: '全部' },
                   { value: 'favorite', label: '星标' },
@@ -3125,7 +3212,7 @@ function BrowseWorktable({
                     key={filter.value}
                     type="button"
                     onClick={() => setCardFilter(filter.value)}
-                    className={`h-8 rounded-lg px-3 transition-colors ${cardFilter === filter.value ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800'}`}
+                    className={`h-7 rounded-lg px-2.5 transition-colors ${cardFilter === filter.value ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800'}`}
                   >
                     {filter.label}
                   </button>
@@ -3134,7 +3221,7 @@ function BrowseWorktable({
                 <button
                   type="button"
                   onClick={() => setFlagColorFilter('all')}
-                  className={`h-8 rounded-lg px-3 ${flagColorFilter === 'all' ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                  className={`h-7 rounded-lg px-2.5 ${flagColorFilter === 'all' ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
                 >
                   全部旗色
                 </button>
@@ -3146,7 +3233,7 @@ function BrowseWorktable({
                       setCardFilter('flagged')
                       setFlagColorFilter(color.value)
                     }}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 ${flagColorFilter === color.value ? getFlagColorClass(color.value) : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                    className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2 ${flagColorFilter === color.value ? getFlagColorClass(color.value) : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
                   >
                     <Flag size={13} fill={flagColorFilter === color.value ? 'currentColor' : 'none'} />
                     {color.label}
@@ -3156,10 +3243,8 @@ function BrowseWorktable({
             </div>
 
             <div className="max-h-[600px] overflow-auto bg-gray-50/70 p-3">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-                {visibleCardRows.map((card) => {
-                  const flagColor = getCardFlagColor(card)
-                  return (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleCardRows.map((card) => (
                     <article
                       key={card.id}
                       role="button"
@@ -3172,45 +3257,24 @@ function BrowseWorktable({
                         }
                       }}
                       onContextMenu={(event) => openContextMenu(event, { type: 'card', cardId: card.id })}
-                      className={`flex min-h-[158px] cursor-pointer flex-col rounded-lg border px-3 py-3 text-left shadow-sm transition-colors ${selectedCard?.id === card.id ? 'border-green-200 bg-green-50/90' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                      className={`flex min-h-[128px] cursor-pointer flex-col rounded-md border px-2.5 py-2 text-left shadow-sm transition-colors ${selectedCard?.id === card.id ? 'border-green-200 bg-green-50/90' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <h3 className="line-clamp-2 text-sm font-black leading-5 text-gray-950">{card.front}</h3>
+                      <div className="flex items-start justify-between gap-1.5">
+                        <h3 className="line-clamp-2 min-w-0 flex-1 text-[13px] font-black leading-4 text-gray-950">{card.front}</h3>
                         <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black ${isNewCard(card) ? 'bg-blue-50 text-blue-600' : isCardDue(card) ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
                           {getCardReviewStateLabel(card)}
                         </span>
                       </div>
-                      <p className="mt-2 line-clamp-4 flex-1 text-xs leading-5 text-gray-500">{card.back}</p>
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate text-[11px] font-bold text-gray-300">{hasStoredCardHtml(card) ? 'HTML' : '文本'} · {getCardScopeParts(card, new Map(data.decks.map((deck) => [deck.id, deck]))).at(-1)}</span>
+                      <p className="mt-1.5 line-clamp-4 flex-1 text-[11px] leading-4 text-gray-500">{card.back}</p>
+                      <div className="mt-2 flex items-center justify-between gap-1.5">
+                        <span className="min-w-0 truncate text-[10px] font-bold text-gray-300">{hasStoredCardHtml(card) ? 'HTML' : '文本'} · {getCardScopeParts(card, browseDeckById).at(-1)}</span>
                         <span className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              toggleCardFavorite(card)
-                            }}
-                            className={`grid h-7 w-7 place-items-center rounded-lg ${card.favorite ? 'bg-yellow-50 text-yellow-500' : 'text-gray-300 hover:bg-gray-100 hover:text-yellow-500'}`}
-                            title={card.favorite ? '取消星标' : '星标'}
-                          >
-                            <Star size={15} fill={card.favorite ? 'currentColor' : 'none'} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setCardFlagColor(card, flagColor ? '' : 'red')
-                            }}
-                            className={`grid h-7 w-7 place-items-center rounded-lg ${flagColor ? getFlagColorClass(flagColor) : 'text-gray-300 hover:bg-gray-100 hover:text-red-500'}`}
-                            title={flagColor ? '取消旗帜' : '旗帜'}
-                          >
-                            <Flag size={15} fill={flagColor ? 'currentColor' : 'none'} />
-                          </button>
+                          {renderFavoriteControl(card)}
+                          {renderFlagControl(card)}
                         </span>
                       </div>
                     </article>
-                  )
-                })}
+                ))}
               </div>
               {visibleCards.length > visibleCardRows.length && (
                 <p className="px-3 py-4 text-center text-xs font-bold text-gray-400">已显示前 {visibleCardRows.length} 张，继续搜索可以缩小范围。</p>
@@ -3227,16 +3291,25 @@ function BrowseWorktable({
           </div>
           {selectedCard ? (
             <div className="max-h-[670px] overflow-auto p-4">
-              <div className="mb-3 flex items-center gap-2">
-                {selectedCard.favorite && <span className="rounded-lg bg-yellow-50 px-2 py-1 text-[11px] font-black text-yellow-700">星标</span>}
-                {isCardFlagged(selectedCard) && <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-black ${getFlagColorClass(getCardFlagColor(selectedCard))}`}><Flag size={12} fill="currentColor" />旗帜</span>}
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="min-w-0 flex flex-wrap items-center gap-1.5">
+                  <span className={`rounded-lg px-2 py-1 text-[11px] font-black ${isNewCard(selectedCard) ? 'bg-blue-50 text-blue-600' : isCardDue(selectedCard) ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                    {getCardReviewStateLabel(selectedCard)}
+                  </span>
+                  {selectedCard.favorite && <span className="rounded-lg bg-yellow-50 px-2 py-1 text-[11px] font-black text-yellow-700">星标</span>}
+                  {isCardFlagged(selectedCard) && <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-black ${getFlagColorClass(getCardFlagColor(selectedCard))}`}><Flag size={12} fill="currentColor" />旗帜</span>}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {renderFavoriteControl(selectedCard, 'lg')}
+                  {renderFlagControl(selectedCard, 'lg')}
+                </div>
               </div>
               <p className="mb-2 text-xs font-bold text-gray-400">Front</p>
               <CardContent
                 card={selectedCard}
                 side="front"
-                className="text-base font-black leading-relaxed text-gray-950 break-words"
-                fallbackClassName="text-base font-black leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
+                className="text-sm font-bold leading-relaxed text-gray-950 break-words"
+                fallbackClassName="text-sm font-bold leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
               />
               <div className="my-5 h-px bg-gray-200" />
               <p className="mb-2 text-xs font-bold text-gray-400">Back</p>
@@ -3346,16 +3419,16 @@ function BrowseWorktable({
                 {contextCard.favorite ? '取消星标' : '设为星标'}
               </button>
               <div className="my-1 h-px bg-gray-100" />
-              {FLAG_COLOR_OPTIONS.map((color) => (
-                <button key={color.value} type="button" onClick={() => { setCardFlagColor(contextCard, color.value); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
-                  <Flag size={14} fill="currentColor" className={getFlagColorClass(color.value).replace('bg-', 'text-').split(' ')[1] ?? 'text-red-500'} />
-                  {color.label}
-                </button>
-              ))}
               <button type="button" onClick={() => { setCardFlagColor(contextCard, ''); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-gray-400 hover:bg-gray-50">
                 <Flag size={14} />
-                清除旗帜
+                无色
               </button>
+              {FLAG_COLOR_OPTIONS.map((color) => (
+                <button key={color.value} type="button" onClick={() => { setCardFlagColor(contextCard, color.value); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                  <Flag size={14} fill="currentColor" className={getFlagColorTextClass(color.value)} />
+                  {color.menuLabel}
+                </button>
+              ))}
             </>
           ) : (
             <>
@@ -4286,12 +4359,45 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
     return activeEditorFieldRef.current === 'front' ? 'front' : 'back'
   }
 
+  function pasteHtmlIntoField(field, html) {
+    const safeHtml = sanitizeCardHtml(html).trim()
+    if (!safeHtml) return false
+
+    const ref = field === 'front' ? frontRef.current : backRef.current
+    const value = form[field] ?? ''
+    const start = ref?.selectionStart ?? value.length
+    const end = ref?.selectionEnd ?? value.length
+    const nextValue = `${value.slice(0, start)}${safeHtml}${value.slice(end)}`
+    const nextCursor = start + safeHtml.length
+
+    setError('')
+    markActiveEditorField(field)
+    setForm((current) => ({ ...current, template: 'html', [field]: nextValue }))
+    setStatusMessage('已按 HTML 格式粘贴')
+    window.requestAnimationFrame(() => {
+      ref?.focus()
+      ref?.setSelectionRange(nextCursor, nextCursor)
+    })
+    return true
+  }
+
+  function handleEditorPaste(event, field) {
+    markActiveEditorField(field)
+    const clipboardHtml = event.clipboardData?.getData('text/html') ?? ''
+    const clipboardText = event.clipboardData?.getData('text/plain') ?? ''
+    const html = clipboardHtml.trim() || (looksLikeHtml(clipboardText) ? clipboardText : '')
+    if (!html) return
+
+    event.preventDefault()
+    pasteHtmlIntoField(field, html)
+  }
+
   const handleSave = useCallback(() => {
     const isHtmlTemplate = form.template === 'html'
     const front = form.front.trim()
     const back = form.back.trim()
     const frontText = isHtmlTemplate ? htmlToPlainText(front) || 'HTML 正面' : front
-    const backText = isHtmlTemplate ? htmlToPlainText(back) || 'HTML 背面' : back
+    const backText = isHtmlTemplate && back ? htmlToPlainText(back) || 'HTML 背面' : back
 
     if (!form.deckId) {
       setError('请先选择一个目录。')
@@ -4299,10 +4405,6 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
     }
     if (!front) {
       setError('问题不能为空。')
-      return
-    }
-    if (!back) {
-      setError('答案不能为空。')
       return
     }
 
@@ -4551,8 +4653,9 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
                 }}
                 onFocus={() => markActiveEditorField('front')}
                 onClick={() => markActiveEditorField('front')}
+                onPaste={(event) => handleEditorPaste(event, 'front')}
                 className="min-h-[170px] w-full resize-none rounded-2xl bg-gray-50 px-4 py-4 text-lg leading-relaxed outline-none focus:ring-2 focus:ring-[#007aff]/20"
-                placeholder="输入问题"
+                placeholder="输入问题，或直接粘贴 HTML / 富文本"
               />
             </label>
 
@@ -4595,8 +4698,9 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
                 }}
                 onFocus={() => markActiveEditorField('back')}
                 onClick={() => markActiveEditorField('back')}
+                onPaste={(event) => handleEditorPaste(event, 'back')}
                 className="min-h-[210px] flex-1 w-full resize-none bg-gray-50 px-4 py-4 text-lg leading-relaxed outline-none"
-                placeholder="输入答案"
+                placeholder="输入答案，可留空，也可直接粘贴 HTML / 富文本"
               />
             </div>
 
