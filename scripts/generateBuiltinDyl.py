@@ -14,6 +14,8 @@ PACK_TITLE = "【DYL】考试分析重新排版"
 MEDIA_DIR = ROOT / "public" / "bundles" / PACK_ID / "media"
 CARD_CHUNK_SIZE = 25
 FIELD_SEPARATOR = "\x1f"
+MAX_SIDE_HTML_LENGTH = 120000
+MAX_CARD_CSS_LENGTH = 10000
 
 ANSWER_PATTERNS = [
     re.compile(r"(?:[【［\[]\s*)?(?:参考答案|参考解析|答案解析|解析答案|参考解答)(?:\s*[】］\]])?\s*[:：]?", re.I),
@@ -176,6 +178,31 @@ def looks_rich(markup=""):
     )
 
 
+def text_coverage(text="", target=""):
+    clean_text = normalize_text(text)
+    clean_target = normalize_text(target)
+    if not clean_text or not clean_target:
+        return 0
+    if clean_target in clean_text:
+        return 1
+    if clean_text in clean_target:
+        return len(clean_text) / len(clean_target)
+
+    sample = clean_target[: min(120, len(clean_target))]
+    if len(sample) >= 20 and sample in clean_text:
+        return len(sample) / len(clean_target)
+
+    index = 0
+    limit = min(len(clean_text), len(clean_target))
+    while index < limit and clean_text[index] == clean_target[index]:
+        index += 1
+    return index / len(clean_target)
+
+
+def html_coverage(markup="", target=""):
+    return text_coverage(strip_tags(markup), target)
+
+
 def is_script_text(value=""):
     text = strip_tags(value)
     return (not text) or bool(SCRIPT_CALL_RE.match(text))
@@ -183,7 +210,7 @@ def is_script_text(value=""):
 
 def make_html(markup, fallback):
     safe = strip_unsafe(markup, keep_img=True).strip()
-    if not safe or len(safe) > 52000:
+    if not safe or len(safe) > MAX_SIDE_HTML_LENGTH:
         return ""
     text = strip_tags(safe)
     if not text and "<img" not in safe.lower():
@@ -195,6 +222,17 @@ def make_html(markup, fallback):
     return safe
 
 
+def pick_front_html(template_html, field_html, fallback):
+    template_safe = make_html(clean_html_fragment(template_html), fallback)
+    field_safe = make_html(clean_html_fragment(field_html), fallback)
+    if template_safe and field_safe:
+        template_coverage = html_coverage(template_safe, fallback)
+        field_coverage = html_coverage(field_safe, fallback)
+        if field_coverage > template_coverage + 0.15 or (template_coverage < 0.35 and field_coverage > template_coverage):
+            return field_safe
+    return template_safe or field_safe
+
+
 def make_css(css=""):
     output = str(css or "")
     output = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "", output, flags=re.I)
@@ -202,7 +240,7 @@ def make_css(css=""):
     output = re.sub(r"url\((?:\"[^\"]*\"|'[^']*'|[^)]*)\)", "none", output, flags=re.I)
     output = re.sub(r"(?:-webkit-|-moz-|-ms-)?user-select\s*:\s*[^;{}]+;?", "", output, flags=re.I)
     output = re.sub(r"-webkit-touch-callout\s*:\s*[^;{}]+;?", "", output, flags=re.I)
-    return output.strip()[:8000]
+    return output.strip()[:MAX_CARD_CSS_LENGTH]
 
 
 TAG_RE = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*>", re.I)
@@ -283,6 +321,10 @@ def make_field_sections(fields):
 
 def render_section_html(section):
     return f'<section class="anki-html-section"><h3>{html.escape(section["label"])}</h3>{section["html"]}</section>'
+
+
+def render_sections_html(sections):
+    return "".join(render_section_html(section) for section in sections)
 
 
 def stable_id(value):
@@ -449,9 +491,9 @@ def main():
             "builtinPack": PACK_ID,
         }
 
-        front_html = make_html(clean_html_fragment(question_html), front_text)
+        front_html = pick_front_html(question_html, front_source, front_text)
         if html_sections:
-            back_html = make_html(render_section_html(html_sections[0]), back_text)
+            back_html = make_html(render_sections_html(html_sections), back_text) or make_html(render_section_html(html_sections[0]), back_text)
         else:
             back_html = make_html(clean_html_fragment(rendered_back), back_text)
         card_css = make_css(model.get("css") or "") if (front_html or back_html) else ""

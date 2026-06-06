@@ -8,9 +8,9 @@ import {
 } from './ankiHtml'
 
 const FIELD_SEPARATOR = '\x1f'
-const MAX_SIDE_HTML_LENGTH = 36000
-const MAX_CARD_CSS_LENGTH = 8000
-const MAX_CARD_RICH_CONTENT_LENGTH = 52000
+const MAX_SIDE_HTML_LENGTH = 120000
+const MAX_CARD_CSS_LENGTH = 10000
+const MAX_CARD_RICH_CONTENT_LENGTH = 180000
 const SCRIPT_CALL_PATTERN = /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i
 
 let sqlPromise = null
@@ -120,6 +120,26 @@ function removeKnownPrefixText(text = '', prefix = '') {
   return cleanText
 }
 
+function textCoverage(text = '', target = '') {
+  const cleanText = normalizeText(text)
+  const cleanTarget = normalizeText(target)
+  if (!cleanText || !cleanTarget) return 0
+  if (cleanText.includes(cleanTarget)) return 1
+  if (cleanTarget.includes(cleanText)) return cleanText.length / cleanTarget.length
+
+  const sample = cleanTarget.slice(0, Math.min(120, cleanTarget.length))
+  if (sample.length >= 20 && cleanText.includes(sample)) return sample.length / cleanTarget.length
+
+  let commonPrefix = 0
+  const limit = Math.min(cleanText.length, cleanTarget.length)
+  while (commonPrefix < limit && cleanText[commonPrefix] === cleanTarget[commonPrefix]) commonPrefix += 1
+  return commonPrefix / cleanTarget.length
+}
+
+function htmlCoverage(html = '', target = '') {
+  return textCoverage(stripHtml(html), target)
+}
+
 function looksLikeRichHtml(value = '') {
   return /<(?:table|ul|ol|strong|em|b|i|ruby|rt|br|div|span|p|section|article|h[1-6]|style)\b/i.test(String(value))
     || /\s(?:class|style)=/i.test(String(value))
@@ -205,9 +225,26 @@ function makeStoredSideHtml(renderedHtml, fallbackText) {
 
 function pickSideHtml({ renderedHtml, fields, side, fallbackText }) {
   const renderedSideHtml = makeStoredSideHtml(renderedHtml, fallbackText)
-  if (renderedSideHtml) return renderedSideHtml
+  const fieldSideHtml = makeStoredSideHtml(pickFieldHtml(fields, side, fallbackText), fallbackText)
 
-  return makeStoredSideHtml(pickFieldHtml(fields, side, fallbackText), fallbackText)
+  if (side === 'front' && renderedSideHtml && fieldSideHtml) {
+    const renderedCoverage = htmlCoverage(renderedSideHtml, fallbackText)
+    const fieldCoverage = htmlCoverage(fieldSideHtml, fallbackText)
+    if (fieldCoverage > renderedCoverage + 0.15 || (renderedCoverage < 0.35 && fieldCoverage > renderedCoverage)) {
+      return fieldSideHtml
+    }
+  }
+
+  return renderedSideHtml || fieldSideHtml
+}
+
+function getFieldByNames(fields, names) {
+  const entries = Object.entries(fields)
+  for (const name of names) {
+    const match = entries.find(([fieldName]) => String(fieldName).toLowerCase() === String(name).toLowerCase())
+    if (match && stripHtml(match[1])) return match[1]
+  }
+  return ''
 }
 
 function findMatchingTag(markup = '', openStart = 0, tagName = 'div') {
@@ -255,8 +292,36 @@ function extractToggleSections(markup = '') {
   }).filter(Boolean)
 }
 
+function makeFieldSections(fields) {
+  const specs = [
+    ['analysis', '考试分析原文', ['原文', '分析原文', '考试分析原文']],
+    ['choice', '选择题', ['选择题']],
+    ['answer', '答案与解析', ['答案与解析', '解析', '答案', 'Back']],
+    ['source-note', '我的笔记', ['我的笔记', 'DYL笔记', '笔记', 'Note']],
+  ]
+
+  return specs.map(([id, label, names]) => {
+    const html = stripUnsafeTemplateParts(getFieldByNames(fields, names)).trim()
+    const text = stripHtml(html)
+    return html && text ? { id, label, html, text } : null
+  }).filter(Boolean)
+}
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function renderSectionHtml(section) {
-  return `<section class="anki-html-section"><h3>${section.label}</h3>${section.html}</section>`
+  return `<section class="anki-html-section"><h3>${escapeHtml(section.label)}</h3>${section.html}</section>`
+}
+
+function renderSectionsHtml(sections) {
+  return sections.map(renderSectionHtml).join('')
 }
 
 function makeStoredCss(css = '') {
@@ -384,27 +449,36 @@ export async function parseApkgFile(file, options = {}) {
 
       const frontText = stripAnswerSectionFromText(pickSideText({ renderedHtml: renderedQuestionHtml, fields, note, side: 'front' }))
       const htmlSections = extractToggleSections(answerHtml)
+      const answerSections = htmlSections.length > 0 ? htmlSections : makeFieldSections(fields)
       const sectionBackText = normalizeText(htmlSections
         .map((section) => removeKnownPrefixText(section.text, frontText) || section.text)
         .join(' '))
-      const backText = sectionBackText || pickSideText({ renderedHtml: answerHtml, fields, note, side: 'back', avoidText: frontText })
+      const fieldSectionBackText = normalizeText(answerSections
+        .map((section) => removeKnownPrefixText(section.text, frontText) || section.text)
+        .join(' '))
+      const backText = fieldSectionBackText || sectionBackText || pickSideText({ renderedHtml: answerHtml, fields, note, side: 'back', avoidText: frontText })
       if (!frontText || !backText) {
         skippedCards += 1
         continue
       }
       let frontHtml = stripAnswerSectionFromHtml(pickSideHtml({ renderedHtml: renderedQuestionHtml, fields, side: 'front', fallbackText: frontText }))
-      let backHtml = htmlSections.length > 0
-        ? makeStoredSideHtml(renderSectionHtml(htmlSections[0]), backText)
+      let backHtml = answerSections.length > 0
+        ? (makeStoredSideHtml(renderSectionsHtml(answerSections), backText) || makeStoredSideHtml(renderSectionHtml(answerSections[0]), backText))
         : pickSideHtml({ renderedHtml: answerHtml, fields, side: 'back', fallbackText: backText })
       let cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
       if (frontHtml.length + backHtml.length + cardCss.length > MAX_CARD_RICH_CONTENT_LENGTH) {
-        if (frontHtml.length + backHtml.length <= MAX_CARD_RICH_CONTENT_LENGTH) {
-          cardCss = ''
-        } else {
-          frontHtml = ''
-          backHtml = ''
-          cardCss = ''
-        }
+        cardCss = ''
+      }
+      if (frontHtml.length + backHtml.length > MAX_CARD_RICH_CONTENT_LENGTH && answerSections.length > 0) {
+        backHtml = ''
+      }
+      if (frontHtml.length + backHtml.length > MAX_CARD_RICH_CONTENT_LENGTH) {
+        if (backHtml.length >= frontHtml.length) backHtml = ''
+        else frontHtml = ''
+      }
+      if (frontHtml.length + backHtml.length > MAX_CARD_RICH_CONTENT_LENGTH) {
+        frontHtml = ''
+        backHtml = ''
       }
 
       deckNames.add(deckName)
@@ -420,7 +494,7 @@ export async function parseApkgFile(file, options = {}) {
         frontHtml,
         backHtml,
         cardCss,
-        ...(htmlSections.length > 0 ? { htmlSections } : {}),
+        ...(answerSections.length > 0 ? { htmlSections: answerSections } : {}),
         template: 'anki',
         tags,
         sourceKey: `apkg:${note.id}:${card.id}:${card.ord}`,
