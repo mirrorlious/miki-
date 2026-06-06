@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // 旧版整包 payload：迁移时会尝试读取。代码已允许此路径无权限时跳过旧迁移。
+    match /memorizerUsers/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // 新版用户根文档。
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // 新版所有子集合：cards / decks / dailyLogs / profile / reviewLogs / activity / migration 等。
+      match /{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}
