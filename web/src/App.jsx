@@ -5,8 +5,6 @@ import PixelItemIcon from './components/PixelItemIcon.jsx'
 import CollapseToggle from './components/CollapseToggle.jsx'
 import CardContent from './components/CardContent.jsx'
 import AuthDialog from './components/AuthDialog.jsx'
-import DeckDialog from './components/DeckDialog.jsx'
-import Dashboard from './components/Dashboard.jsx'
 import Shell from './components/Shell.jsx'
 import { motion } from 'framer-motion'
 import DOMPurify from 'dompurify'
@@ -1155,198 +1153,257 @@ function parseDailyReview(content) {
 
 
 
-function getRewardState(data) {
-  const achievementState = getAchievementState(data)
-  const profile = getStoredProfile(data)
-  const redeemedRewards = profile.redeemedRewards
-  const spentPoints = redeemedRewards.reduce((sum, item) => {
-    const reward = REWARD_OPTIONS.find((option) => option.id === item.rewardId)
-    return sum + (reward?.cost ?? 0)
-  }, 0)
-
-  return {
-    ...achievementState,
-    spentPoints,
-    availablePoints: Math.max(0, achievementState.totalPoints - spentPoints),
-    redeemedRewards,
-  }
-}
 
 
-function Home() {
-  return <Navigate to="/decks" replace />
-}
-
-function Profile({ data, cloud, studyDeckId, onUpdateProfile, onRedeemReward }) {
-  const profile = getProfile(data, cloud)
-  const rewardState = getRewardState(data)
-  const summary = stats(data)
-  const [form, setForm] = useState({
-    nickname: profile.nickname,
-    bio: profile.bio,
-    examDate: profile.examDate,
-    dailyGoalMinutes: profile.dailyGoalMinutes,
-  })
-  const [message, setMessage] = useState('')
+function DeckDialog({ open, mode, initialValue, existingNames, onClose, onSubmit }) {
+  const [form, setForm] = useState({ name: '', description: '', color: 'sun', section: '', chapter: '' })
+  const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!open) return
     setForm({
-      nickname: profile.nickname,
-      bio: profile.bio,
-      examDate: profile.examDate,
-      dailyGoalMinutes: profile.dailyGoalMinutes,
+      name: initialValue?.name ?? '',
+      description: initialValue?.description ?? '',
+      color: initialValue?.color ?? 'sun',
+      section: initialValue?.section ?? '',
+      chapter: initialValue?.chapter ?? '',
     })
-  }, [profile.bio, profile.dailyGoalMinutes, profile.examDate, profile.nickname])
+    setError('')
+  }, [open, initialValue])
+
+  if (!open) return null
 
   function handleSubmit(event) {
     event.preventDefault()
-    onUpdateProfile({
-      nickname: form.nickname.trim() || '学习者',
-      avatarUrl: '',
-      bio: form.bio.trim(),
-      examDate: form.examDate,
-      dailyGoalMinutes: Math.max(5, Number(form.dailyGoalMinutes) || 45),
-    })
-    setMessage('已保存')
-    window.setTimeout(() => setMessage(''), 1600)
+    const name = form.name.trim()
+    const description = form.description.trim()
+    const section = form.section.trim()
+    const chapter = form.chapter.trim()
+    const duplicated = existingNames.some((item) => item.toLowerCase() === name.toLowerCase())
+
+    if (!name) {
+      setError('卡组名称不能为空。')
+      return
+    }
+    if (name.length > 24) {
+      setError('卡组名称不要超过 24 个字。')
+      return
+    }
+    if (description.length > 120) {
+      setError('卡组说明不要超过 120 个字。')
+      return
+    }
+    if (section.length > 18) {
+      setError('板块名称不要超过 18 个字。')
+      return
+    }
+    if (chapter.length > 40) {
+      setError('章节/专题不要超过 40 个字。')
+      return
+    }
+    if (duplicated) {
+      setError('已经有同名卡组了，换一个名字。')
+      return
+    }
+
+    onSubmit({ name, description: description || '先往里面放最核心的一组卡片。', color: form.color, section, chapter })
   }
 
   return (
-    <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
-      <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-black text-gray-950">个人中心</h1>
-          <p className="mt-1 text-xs text-gray-500">管理昵称、学习目标和成就点兑换。</p>
-        </div>
-        <div className="rounded-2xl bg-white/90 px-4 py-2 text-right shadow-sm ring-1 ring-white">
-          <p className="text-xl font-black text-gray-950">{rewardState.availablePoints}</p>
-          <p className="text-[11px] font-bold text-gray-400">可用成就点</p>
-        </div>
-      </header>
-
-      <section className="mb-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <form onSubmit={handleSubmit} className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
-          <div className="mb-5 flex flex-wrap items-center gap-4">
-            <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-300">Profile</p>
-              <h2 className="mt-1 text-xl font-black text-gray-950">{form.nickname || profile.nickname}</h2>
-              <p className="mt-1 text-xs font-bold text-gray-400">{cloud.enabled ? cloud.message : '本地浏览器数据'}</p>
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 backdrop-blur-sm px-4">
+      <div className="w-full max-w-lg bg-white rounded-[28px] border border-gray-100 shadow-2xl p-7">
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <p className="text-[11px] text-gray-400 font-bold tracking-[0.2em] uppercase mb-2">{mode === 'create' ? 'Create Deck' : 'Edit Deck'}</p>
+            <h3 className="text-2xl font-black text-gray-900">{mode === 'create' ? '新建卡组' : '编辑卡组'}</h3>
           </div>
+          <button type="button" onClick={onClose} className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500">
+            <X size={16} />
+          </button>
+        </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-3">
             <label className="block">
-              <span className="mb-2 block text-sm font-black text-gray-800">昵称</span>
+              <span className="block text-sm font-bold text-gray-800 mb-2">板块</span>
               <input
-                value={form.nickname}
-                onChange={(event) => setForm((current) => ({ ...current, nickname: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
-                placeholder="给自己起个学习名"
+                value={form.section}
+                list="deck-section-suggestions"
+                onChange={(event) => setForm((current) => ({ ...current, section: event.target.value }))}
+                placeholder="可先留空"
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
               />
+              <datalist id="deck-section-suggestions">
+                {DEFAULT_DECK_SECTIONS.map((section) => <option key={section} value={section} />)}
+              </datalist>
             </label>
 
             <label className="block">
-              <span className="mb-2 block text-sm font-black text-gray-800">考试日期</span>
+              <span className="block text-sm font-bold text-gray-800 mb-2">章节/专题</span>
               <input
-                type="date"
-                value={form.examDate}
-                onChange={(event) => setForm((current) => ({ ...current, examDate: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
-              />
-            </label>
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-black text-gray-800">每日专注目标</span>
-              <input
-                type="number"
-                min="5"
-                step="5"
-                value={form.dailyGoalMinutes}
-                onChange={(event) => setForm((current) => ({ ...current, dailyGoalMinutes: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 text-sm font-bold text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
+                value={form.chapter}
+                onChange={(event) => setForm((current) => ({ ...current, chapter: event.target.value }))}
+                placeholder="可后续整理，例如：刑法总则、规律题"
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
               />
             </label>
           </div>
 
-          <label className="mt-4 block">
-            <span className="mb-2 block text-sm font-black text-gray-800">个人签名</span>
-            <textarea
-              value={form.bio}
-              onChange={(event) => setForm((current) => ({ ...current, bio: event.target.value }))}
-              rows={3}
-              className="w-full resize-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold leading-6 text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
-              placeholder="写一句给复习中的自己看的话"
+          <label className="block">
+            <span className="block text-sm font-bold text-gray-800 mb-2">卡组名称</span>
+            <input
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              placeholder="例如：考研英语高频词"
+              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900 outline-none focus:border-blue-400 focus:bg-white"
             />
           </label>
 
-          <div className="mt-5 flex items-center justify-end gap-3">
-            {message && <span className="text-xs font-black text-green-600">{message}</span>}
-            <button type="submit" className="h-10 rounded-xl bg-gray-950 px-5 text-sm font-black text-white hover:bg-gray-800">
-              保存资料
+          <label className="block">
+            <span className="block text-sm font-bold text-gray-800 mb-2">卡组说明</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              rows={3}
+              placeholder="写一句简短说明，方便你以后快速判断用途。"
+              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900 outline-none focus:border-blue-400 focus:bg-white resize-none"
+            />
+          </label>
+
+          <div>
+            <span className="block text-sm font-bold text-gray-800 mb-2">卡组颜色</span>
+            <div className="grid grid-cols-4 gap-3">
+              {DECK_COLOR_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setForm((current) => ({ ...current, color: option.value }))}
+                  className={`rounded-2xl border px-3 py-4 text-xs font-bold transition-all ${form.color === option.value ? 'border-gray-900 bg-gray-900 text-white shadow-sm' : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {error && <p className="text-sm font-bold text-red-600">{error}</p>}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50">
+              取消
+            </button>
+            <button type="submit" className="px-6 py-2.5 rounded-full bg-gray-900 text-white text-sm font-bold hover:bg-gray-800 shadow-sm">
+              {mode === 'create' ? '创建卡组' : '保存修改'}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
 
-        <aside className="space-y-5">
-          <section className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
-            <h2 className="text-sm font-black text-gray-950">学习资产</h2>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <div className="rounded-xl bg-gray-50 px-3 py-3">
-                <p className="text-2xl font-black text-gray-950">{summary.mastered}</p>
-                <p className="text-[11px] font-bold text-gray-400">已掌握卡片</p>
-              </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-3">
-                <p className="text-2xl font-black text-gray-950">{rewardState.earnedItems.length}</p>
-                <p className="text-[11px] font-bold text-gray-400">已获成就</p>
-              </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-3">
-                <p className="text-2xl font-black text-gray-950">{rewardState.totalPoints}</p>
-                <p className="text-[11px] font-bold text-gray-400">累计点数</p>
-              </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-3">
-                <p className="text-2xl font-black text-gray-950">{rewardState.spentPoints}</p>
-                <p className="text-[11px] font-bold text-gray-400">已兑换</p>
-              </div>
-            </div>
-          </section>
+function Dashboard({ data, onOpenCreateDeck, studyDeckId, cloud }) {
+  const navigate = useNavigate()
+  const summary = stats(data)
+  const dueCards = data.cards.filter(isCardDue)
+  const deckRows = data.decks.map((deck) => {
+    const cards = data.cards.filter((card) => card.deckId === deck.id)
+    return {
+      ...deck,
+      total: cards.length,
+      due: cards.filter(isCardDue).length,
+      newCount: cards.filter(isNewCard).length,
+    }
+  })
 
-          <section className="rounded-2xl bg-white/90 p-5 shadow-sm ring-1 ring-white">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-black text-gray-950">奖励兑换</h2>
-              <span className="rounded-full bg-green-50 px-2 py-1 text-[11px] font-black text-green-700">{rewardState.availablePoints} 点可用</span>
-            </div>
-            <div className="mt-4 space-y-3">
-              {REWARD_OPTIONS.map((reward) => {
-                const redeemed = rewardState.redeemedRewards.some((item) => item.rewardId === reward.id)
-                const affordable = rewardState.availablePoints >= reward.cost
-                return (
-                  <div key={reward.id} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-black text-gray-950">{reward.title}</p>
-                        <p className="mt-1 text-xs leading-relaxed text-gray-500">{reward.description}</p>
-                      </div>
-                      <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-black text-gray-500">{reward.badge}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onRedeemReward(reward.id)}
-                      disabled={redeemed || !affordable}
-                      className="mt-3 h-9 w-full rounded-xl bg-gray-950 text-xs font-black text-white hover:bg-gray-800 disabled:bg-gray-200 disabled:text-gray-400"
-                    >
-                      {redeemed ? '已兑换' : `${reward.cost} 点兑换`}
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-        </aside>
+  return (
+    <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
+      <header className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-gray-950">统计</h1>
+          <p className="text-xs text-gray-500 mt-1">按卡组查看当前复习负载。</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => onOpenCreateDeck()} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">
+            新建卡组
+          </button>
+          <button onClick={() => studyDeckId && navigate(`/study/${studyDeckId}`)} className="h-10 px-4 rounded-xl bg-[#007aff] text-white text-sm font-bold shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={!studyDeckId}>
+            开始学习
+          </button>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+        <div className="rounded-2xl bg-white/90 border border-white shadow-sm p-5">
+          <p className="text-xs font-bold text-gray-500 mb-2">今日待复习</p>
+          <p className="text-3xl font-black text-gray-950">{summary.dueToday}</p>
+        </div>
+        <div className="rounded-2xl bg-white/90 border border-white shadow-sm p-5">
+          <p className="text-xs font-bold text-gray-500 mb-2">已开始学习</p>
+          <p className="text-3xl font-black text-gray-950">{summary.learned}</p>
+        </div>
+        <div className="rounded-2xl bg-white/90 border border-white shadow-sm p-5">
+          <p className="text-xs font-bold text-gray-500 mb-2">成熟卡片</p>
+          <p className="text-3xl font-black text-gray-950">{summary.mastered}</p>
+        </div>
       </section>
 
-      <AchievementPanel data={data} />
+      <section className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 items-start">
+        <div className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
+          <div className="h-10 px-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-sm font-black text-gray-950">卡组统计</h2>
+            <Link to="/decks" className="text-xs font-bold text-green-600 hover:text-green-700">回到卡组</Link>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-500">
+              <tr>
+                <th className="text-left px-4 py-2 font-bold">目录</th>
+                <th className="text-right px-4 py-2 font-bold">新卡</th>
+                <th className="text-right px-4 py-2 font-bold">到期</th>
+                <th className="text-right px-4 py-2 font-bold">总数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deckRows.map((deck) => (
+                <tr key={deck.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <strong className="block font-bold text-gray-900">{deck.name}</strong>
+                    <span className="mt-1 block text-[11px] font-bold text-gray-400">{getDeckPath(deck)}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-blue-600 font-bold">{deck.newCount}</td>
+                  <td className="px-4 py-3 text-right text-red-600 font-bold">{deck.due}</td>
+                  <td className="px-4 py-3 text-right text-gray-700 font-bold">{deck.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
+          <div className="h-10 px-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-sm font-black text-gray-950">今日清单</h2>
+            <span className="text-xs font-bold text-gray-400">{dueCards.length} 项</span>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto">
+            {dueCards.length === 0 && <p className="text-sm text-gray-400 text-center py-10">没有到期卡片</p>}
+            {dueCards.map((card) => (
+              <button key={card.id} onClick={() => navigate(`/study/${card.deckId}`)} className="w-full text-left flex justify-between items-center px-4 py-3 border-t border-gray-100 hover:bg-gray-50 group">
+                <div className="pr-4">
+                  <h4 className="font-bold text-sm text-gray-900 mb-1 line-clamp-1">{card.front}</h4>
+                  <p className="text-[11px] text-gray-500 line-clamp-1">{card.back}</p>
+                </div>
+                <ChevronRight size={16} className="text-gray-300 group-hover:text-gray-600 transition-colors shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
     </Shell>
   )
+}
+
+function Home() {
+  return <Navigate to="/decks" replace />
 }
 
 function LearningOverviewPanel({ data }) {
@@ -1532,75 +1589,6 @@ function LearningOverviewPanel({ data }) {
   )
 }
 
-
-function AchievementPanel({ data, collapsed = false, onToggle }) {
-  const achievementState = getAchievementState(data)
-  const nextAchievements = achievementState.items.filter((achievement) => !achievement.earned).slice(0, 3)
-  const expanded = !collapsed
-
-  return (
-    <section className="mb-5 rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-      <div className="h-11 px-5 border-b border-gray-100 flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-black text-gray-950">像素物品成就</h2>
-          <p className="text-[11px] font-bold text-gray-400 mt-0.5">低门槛，只奖励已经发生的学习动作。</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-xl font-black text-gray-950">{achievementState.totalPoints}</p>
-            <p className="text-[11px] font-bold text-gray-400">成就点 / {achievementState.maxPoints}</p>
-          </div>
-          {onToggle && <CollapseToggle expanded={expanded} onToggle={onToggle} label="成就" />}
-        </div>
-      </div>
-
-      {expanded && <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-0">
-        <div className="border-b lg:border-b-0 lg:border-r border-gray-100 p-5">
-          <div className="rounded-2xl bg-gray-50 px-4 py-4">
-            <p className="text-xs font-black text-gray-400 mb-2">已获得</p>
-            <p className="text-4xl font-black text-gray-950">{achievementState.earnedItems.length}</p>
-            <p className="mt-1 text-xs font-bold text-gray-400">共 {achievementState.items.length} 枚冒险徽章</p>
-          </div>
-          {nextAchievements.length > 0 && (
-            <div className="mt-4">
-              <p className="mb-2 text-[11px] font-black text-gray-300">下一步</p>
-              <div className="flex flex-col gap-2">
-                {nextAchievements.map((achievement) => (
-                  <div key={achievement.id} className="rounded-lg bg-gray-50 px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-black text-gray-700">{achievement.title}</span>
-                      <span className="text-[11px] font-bold text-gray-400">{achievement.progressText}</span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-gray-400">{achievement.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 p-5">
-          {achievementState.items.map((achievement) => (
-            <div
-              key={achievement.id}
-              className={`border-2 px-3 py-3 flex items-center gap-3 shadow-[3px_3px_0_#e5e7eb] ${achievement.earned ? 'border-gray-900 bg-[#f4fff4]' : 'border-gray-300 bg-gray-50/80'}`}
-            >
-              <PixelItemIcon name={achievement.icon} earned={achievement.earned} />
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <h3 className={`text-sm font-black truncate ${achievement.earned ? 'text-gray-950' : 'text-gray-400'}`}>{achievement.title}</h3>
-                  <span className={`shrink-0 text-xs font-black ${achievement.earned ? 'text-green-700' : 'text-gray-300'}`}>+{achievement.points}</span>
-                </div>
-                <p className={`text-xs leading-relaxed line-clamp-2 ${achievement.earned ? 'text-gray-600' : 'text-gray-400'}`}>{achievement.description}</p>
-                <p className="mt-1 text-[11px] font-bold text-gray-400">{achievement.earned ? '已达成' : achievement.progressText}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>}
-    </section>
-  )
-}
 
 function AchievementSummaryPanel({ data }) {
   const rewardState = getRewardState(data)
