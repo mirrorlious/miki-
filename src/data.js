@@ -25,9 +25,9 @@ export const seedData=()=>({
     {id:'deck-history',name:'中国近代史时间线',description:'事件、年份、意义一起记。',section:'法制史',chapter:'近现代法制',color:'sea',createdAt:Date.now()-86400000*4},
   ],
   cards:[
-    {id:'card-1',deckId:'deck-english',front:'abandon',back:'放弃；丢弃',createdAt:Date.now()-86400000*8,review:{dueDate:todayKey(),interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}},
-    {id:'card-2',deckId:'deck-english',front:'constraint',back:'限制；约束条件',createdAt:Date.now()-86400000*7,review:{dueDate:todayKey(),interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}},
-    {id:'card-3',deckId:'deck-history',front:'辛亥革命爆发于哪一年？',back:'1911 年。它推翻了清王朝统治，推动中国进入共和时代。',createdAt:Date.now()-86400000*4,review:{dueDate:todayKey(),interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}},
+    {id:'card-1',deckId:'deck-english',front:'abandon',back:'放弃；丢弃',createdAt:Date.now()-86400000*8,review:{dueDate:'',interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}},
+    {id:'card-2',deckId:'deck-english',front:'constraint',back:'限制；约束条件',createdAt:Date.now()-86400000*7,review:{dueDate:'',interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}},
+    {id:'card-3',deckId:'deck-history',front:'辛亥革命爆发于哪一年？',back:'1911 年。它推翻了清王朝统治，推动中国进入共和时代。',createdAt:Date.now()-86400000*4,review:{dueDate:'',interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}},
   ],
   reviewLogs:[],
   dailyLogs:[],
@@ -58,10 +58,17 @@ export function scheduleReview(review,grade){
   return {dueDate:dateKey(dueAt),dueAt:dueAt.toISOString(),interval,ease:Number(ease.toFixed(2)),reps,lapses,lastGrade:grade}
 }
 
+const reviewReps=(review)=>{const reps=Number(review?.reps??0);return Number.isFinite(reps)?reps:0}
+const reviewDueTime=(review)=>{
+  if(review?.dueAt){const dueAt=new Date(review.dueAt).getTime();if(Number.isFinite(dueAt))return dueAt}
+  if(review?.dueDate){const dueDate=new Date(`${review.dueDate}T00:00:00`).getTime();if(Number.isFinite(dueDate))return dueDate}
+  return 0
+}
+
 export const stats=(data)=>({
-  dueToday:data.cards.filter(x=>x.review.dueDate<=todayKey()).length,
-  learned:data.cards.filter(x=>x.review.reps>0).length,
-  mastered:data.cards.filter(x=>x.review.interval>=7).length,
+  dueToday:data.cards.filter((x)=>{const dueTime=reviewDueTime(x.review);return reviewReps(x.review)>0&&dueTime>0&&dueTime<=Date.now()}).length,
+  learned:data.cards.filter(x=>reviewReps(x.review)>0).length,
+  mastered:data.cards.filter(x=>reviewReps(x.review)>0&&Number(x.review?.interval??0)>=7).length,
 })
 
 export const themeClass=(c)=>({sun:'theme-sun',sea:'theme-sea',rose:'theme-rose'}[c]??'theme-sun')

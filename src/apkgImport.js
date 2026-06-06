@@ -1,6 +1,11 @@
 import JSZip from 'jszip'
 import initSqlJs from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
+import {
+  stripAnswerSectionFromHtml,
+  stripAnswerSectionFromText,
+  stripSelectionBlockingStylesFromCss,
+} from './ankiHtml'
 
 const FIELD_SEPARATOR = '\x1f'
 const MAX_SIDE_HTML_LENGTH = 36000
@@ -50,9 +55,15 @@ function stripUnsafeTemplateParts(html = '') {
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
     .replace(/<audio\b[^>]*>[\s\S]*?<\/audio>/gi, '')
     .replace(/<video\b[^>]*>[\s\S]*?<\/video>/gi, '')
+    .replace(/<!doctype[^>]*>/gi, '')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<\/?(?:template|html|body)\b[^>]*>/gi, '')
     .replace(/<source\b[^>]*>/gi, '')
     .replace(/<img\b[^>]*>/gi, '')
     .replace(/\[sound:[^\]]+\]/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+    .replace(/url\((?:"[^"]*"|'[^']*'|[^)]*)\)/gi, 'none')
 }
 
 function normalizeText(value = '') {
@@ -199,12 +210,62 @@ function pickSideHtml({ renderedHtml, fields, side, fallbackText }) {
   return makeStoredSideHtml(pickFieldHtml(fields, side, fallbackText), fallbackText)
 }
 
+function findMatchingTag(markup = '', openStart = 0, tagName = 'div') {
+  const openMatch = String(markup).slice(openStart).match(/^<([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*>/)
+  if (!openMatch) return { innerStart: openStart, innerEnd: markup.length }
+
+  const innerStart = openStart + openMatch[0].length
+  const tagPattern = /<\/?([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*>/gi
+  tagPattern.lastIndex = innerStart
+  let depth = 1
+  let match = tagPattern.exec(markup)
+  while (match) {
+    if (match[1].toLowerCase() === tagName.toLowerCase()) {
+      const isClosing = markup[match.index + 1] === '/'
+      const isSelfClosing = match[0].trimEnd().endsWith('/>')
+      if (isClosing) depth -= 1
+      else if (!isSelfClosing) depth += 1
+      if (depth === 0) return { innerStart, innerEnd: match.index }
+    }
+    match = tagPattern.exec(markup)
+  }
+  return { innerStart, innerEnd: markup.length }
+}
+
+function extractDivInnerById(markup = '', contentId = '') {
+  const pattern = new RegExp(`<div\\b(?=[^>]*\\bid=["']${contentId}["'])[^>]*>`, 'i')
+  const match = String(markup).match(pattern)
+  if (!match || match.index == null) return ''
+  const bounds = findMatchingTag(markup, match.index, 'div')
+  return markup.slice(bounds.innerStart, bounds.innerEnd)
+}
+
+function extractToggleSections(markup = '') {
+  const labels = new Map()
+  String(markup).replace(/<button\b[^>]*showContent\((\d+)\)[^>]*>([\s\S]*?)<\/button>/gi, (_, id, labelHtml) => {
+    const label = stripHtml(labelHtml)
+    if (label) labels.set(id, label)
+    return ''
+  })
+
+  return Array.from(labels.entries()).map(([id, label]) => {
+    const html = stripUnsafeTemplateParts(extractDivInnerById(markup, `content${id}`)).trim()
+    const text = stripHtml(html)
+    return html && text ? { id: `content-${id}`, label, html, text } : null
+  }).filter(Boolean)
+}
+
+function renderSectionHtml(section) {
+  return `<section class="anki-html-section"><h3>${section.label}</h3>${section.html}</section>`
+}
+
 function makeStoredCss(css = '') {
-  const safeCss = String(css)
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/@import[^;]+;/gi, '')
-    .replace(/url\((?:"[^"]*"|'[^']*'|[^)]*)\)/gi, 'none')
-    .trim()
+  const safeCss = stripSelectionBlockingStylesFromCss(
+    String(css)
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/@import[^;]+;/gi, '')
+      .replace(/url\((?:"[^"]*"|'[^']*'|[^)]*)\)/gi, 'none'),
+  ).trim()
   return safeCss.length <= MAX_CARD_CSS_LENGTH ? safeCss : ''
 }
 
@@ -307,6 +368,7 @@ export async function parseApkgFile(file, options = {}) {
         clozeIndex: Number(card.ord) + 1,
       }
       const renderedFrontHtml = renderTemplate(template?.qfmt || '{{Front}}', context)
+      const renderedQuestionHtml = stripAnswerSectionFromHtml(renderedFrontHtml)
       const renderedBackHtml = renderTemplate(template?.afmt || '{{Back}}', {
         ...context,
         frontSide: renderedFrontHtml,
@@ -318,16 +380,22 @@ export async function parseApkgFile(file, options = {}) {
         revealed: true,
       })
       const answerHtml = renderedBackAnswerHtml || renderedBackHtml
-      if (isScriptCallText(renderedFrontHtml) || isScriptCallText(answerHtml)) scriptFallbackCount += 1
+      if (isScriptCallText(renderedQuestionHtml) || isScriptCallText(answerHtml)) scriptFallbackCount += 1
 
-      const frontText = pickSideText({ renderedHtml: renderedFrontHtml, fields, note, side: 'front' })
-      const backText = pickSideText({ renderedHtml: answerHtml, fields, note, side: 'back', avoidText: frontText })
+      const frontText = stripAnswerSectionFromText(pickSideText({ renderedHtml: renderedQuestionHtml, fields, note, side: 'front' }))
+      const htmlSections = extractToggleSections(answerHtml)
+      const sectionBackText = normalizeText(htmlSections
+        .map((section) => removeKnownPrefixText(section.text, frontText) || section.text)
+        .join(' '))
+      const backText = sectionBackText || pickSideText({ renderedHtml: answerHtml, fields, note, side: 'back', avoidText: frontText })
       if (!frontText || !backText) {
         skippedCards += 1
         continue
       }
-      let frontHtml = pickSideHtml({ renderedHtml: renderedFrontHtml, fields, side: 'front', fallbackText: frontText })
-      let backHtml = pickSideHtml({ renderedHtml: answerHtml, fields, side: 'back', fallbackText: backText })
+      let frontHtml = stripAnswerSectionFromHtml(pickSideHtml({ renderedHtml: renderedQuestionHtml, fields, side: 'front', fallbackText: frontText }))
+      let backHtml = htmlSections.length > 0
+        ? makeStoredSideHtml(renderSectionHtml(htmlSections[0]), backText)
+        : pickSideHtml({ renderedHtml: answerHtml, fields, side: 'back', fallbackText: backText })
       let cardCss = frontHtml || backHtml ? makeStoredCss(model?.css) : ''
       if (frontHtml.length + backHtml.length + cardCss.length > MAX_CARD_RICH_CONTENT_LENGTH) {
         if (frontHtml.length + backHtml.length <= MAX_CARD_RICH_CONTENT_LENGTH) {
@@ -352,6 +420,7 @@ export async function parseApkgFile(file, options = {}) {
         frontHtml,
         backHtml,
         cardCss,
+        ...(htmlSections.length > 0 ? { htmlSections } : {}),
         template: 'anki',
         tags,
         sourceKey: `apkg:${note.id}:${card.id}:${card.ord}`,

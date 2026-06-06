@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import DOMPurify from 'dompurify'
@@ -26,12 +26,14 @@ import {
   GitBranch,
   Maximize2,
   MessageSquare,
+  Moon,
   MoreVertical,
   PencilLine,
   Plus,
   Settings,
   Star,
   Strikethrough,
+  Sun,
   Target,
   Trash2,
   Underline,
@@ -43,6 +45,12 @@ import {
   X,
 } from 'lucide-react'
 import { parseApkgFile } from './apkgImport'
+import {
+  makeHtmlTextSelectable,
+  stripAnswerSectionFromHtml,
+  stripAnswerSectionFromText,
+  stripSelectionBlockingStylesFromCss,
+} from './ankiHtml'
 import { parseBulkCards, parseMarkdownCards } from './cardImport'
 import { loadData, scheduleReview, stats, STORAGE_KEY, todayKey } from './data'
 import { useCloudSync } from './useCloudSync'
@@ -62,6 +70,10 @@ const ACTIVITY_TICK_SECONDS = 10
 const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
 const BROWSE_CARD_RENDER_LIMIT = 300
+const BUILTIN_DYL_PACK_ID = 'dyl-exam'
+const BUILTIN_DYL_DATA_URL = '/bundles/dyl-exam/data.json'
+const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
+const ThemeContext = createContext({ theme: 'light', toggleTheme: () => {} })
 const STUDY_GRADE_OPTIONS = [
   {
     grade: 0,
@@ -457,6 +469,127 @@ function getCardLinks(card) {
   return Array.isArray(card?.links) ? card.links : []
 }
 
+const FLAG_COLOR_OPTIONS = [
+  { value: 'red', label: '红旗' },
+  { value: 'orange', label: '橙旗' },
+  { value: 'green', label: '绿旗' },
+  { value: 'blue', label: '蓝旗' },
+  { value: 'purple', label: '紫旗' },
+]
+
+function getCardFlagColor(card) {
+  if (card?.flagColor) return card.flagColor
+  return card?.flagged ? 'red' : ''
+}
+
+function isCardFlagged(card) {
+  return Boolean(card?.flagged || getCardFlagColor(card))
+}
+
+function getFlagColorClass(color, active = true) {
+  if (!active) return 'text-gray-300 hover:bg-gray-100 hover:text-red-500'
+  if (color === 'orange') return 'bg-orange-50 text-orange-500'
+  if (color === 'green') return 'bg-green-50 text-green-600'
+  if (color === 'blue') return 'bg-blue-50 text-blue-600'
+  if (color === 'purple') return 'bg-purple-50 text-purple-600'
+  return 'bg-red-50 text-red-500'
+}
+
+function getCardScopeParts(card, deckById) {
+  const sourcePath = Array.isArray(card?.source?.deckPath)
+    ? card.source.deckPath.map(normalizePathPart).filter(Boolean)
+    : []
+  if (sourcePath.length > 0) return sourcePath
+
+  const deck = deckById.get(card?.deckId)
+  if (!deck) return [UNGROUPED_SECTION]
+  return [
+    getDeckSection(deck),
+    ...getDeckChapter(deck).split('/').map(normalizePathPart).filter(Boolean),
+    deck.name,
+  ].filter(Boolean)
+}
+
+function getDeckScopeParts(deck) {
+  return [
+    getDeckSection(deck),
+    ...getDeckChapter(deck).split('/').map(normalizePathPart).filter(Boolean),
+    deck?.name,
+  ].filter(Boolean)
+}
+
+function getScopeKey(parts) {
+  return parts.length === 0 ? 'all' : `scope:${parts.join('|||')}`
+}
+
+function makeScopeNode(parts) {
+  return {
+    key: getScopeKey(parts),
+    label: parts[parts.length - 1] || '全部卡片',
+    pathLabel: parts.join(' / ') || '全部卡片',
+    parts,
+    depth: parts.length,
+    cardIds: new Set(),
+    deckIds: new Set(),
+    childMap: new Map(),
+    children: [],
+  }
+}
+
+function buildBrowseScopeTree(data) {
+  const deckById = new Map(data.decks.map((deck) => [deck.id, deck]))
+  const root = makeScopeNode([])
+
+  function ensureChain(parts) {
+    const chain = [root]
+    let current = root
+    parts.forEach((part, index) => {
+      const nextParts = parts.slice(0, index + 1)
+      const key = getScopeKey(nextParts)
+      if (!current.childMap.has(key)) {
+        current.childMap.set(key, makeScopeNode(nextParts))
+      }
+      current = current.childMap.get(key)
+      chain.push(current)
+    })
+    return chain
+  }
+
+  data.decks.forEach((deck) => {
+    const node = ensureChain(getDeckScopeParts(deck)).at(-1)
+    node.deckIds.add(deck.id)
+  })
+
+  data.cards.forEach((card) => {
+    const chain = ensureChain(getCardScopeParts(card, deckById))
+    chain.forEach((node) => node.cardIds.add(card.id))
+  })
+
+  function finalize(node) {
+    node.children = Array.from(node.childMap.values())
+      .map(finalize)
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN', { numeric: true }))
+    delete node.childMap
+    node.cardIds = Array.from(node.cardIds)
+    node.deckIds = Array.from(node.deckIds)
+    node.count = node.cardIds.length
+    return node
+  }
+
+  return finalize(root)
+}
+
+function flattenScopeTree(node) {
+  return [node, ...node.children.flatMap(flattenScopeTree)]
+}
+
+function findBestScopeNodeForDeck(scopeNodes, deckId) {
+  return scopeNodes
+    .filter((node) => node.deckIds.includes(deckId) || node.cardIds.length > 0)
+    .filter((node) => node.deckIds.includes(deckId))
+    .sort((a, b) => b.depth - a.depth)[0] ?? null
+}
+
 function getCardSideHtml(card, side) {
   return side === 'front' ? card?.frontHtml : card?.backHtml
 }
@@ -481,10 +614,11 @@ function sanitizeCssScopeId(value = '') {
 }
 
 function scopeAnkiCss(css = '', scopeSelector = '.anki-card-content') {
-  const cleanCss = String(css)
-    .replace(/<\/?style[^>]*>/gi, '')
-    .replace(/@import[^;]+;/gi, '')
-    .trim()
+  const cleanCss = stripSelectionBlockingStylesFromCss(
+    String(css)
+      .replace(/<\/?style[^>]*>/gi, '')
+      .replace(/@import[^;]+;/gi, ''),
+  ).trim()
 
   if (!cleanCss) return ''
 
@@ -506,26 +640,40 @@ function scopeAnkiCss(css = '', scopeSelector = '.anki-card-content') {
 }
 
 function sanitizeCardHtml(html) {
-  return DOMPurify.sanitize(String(html ?? ''), {
+  const normalizedHtml = String(html ?? '')
+    .replace(/<!doctype[^>]*>/gi, '')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<\/?(?:template|html|body)[^>]*>/gi, '')
+  const safeHtml = DOMPurify.sanitize(normalizedHtml, {
     ADD_TAGS: ['audio', 'video', 'source'],
     ADD_ATTR: ['alt', 'class', 'colspan', 'controls', 'height', 'href', 'rel', 'rowspan', 'src', 'style', 'target', 'title', 'width'],
   })
+  return makeHtmlTextSelectable(safeHtml)
 }
 
 function isScriptCallText(value = '') {
   return /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i.test(String(value ?? '').replace(/\s+/g, ' ').trim())
 }
 
-function CardContent({ card, side, className = '', fallbackClassName = '', placeholder = '' }) {
-  const explicitHtml = getCardSideHtml(card, side)
-  const text = getCardSideText(card, side) || placeholder
+function getCardHtmlSections(card) {
+  return Array.isArray(card?.htmlSections)
+    ? card.htmlSections.filter((section) => section?.id && section?.label && (section.html || section.text))
+    : []
+}
+
+function CardContent({ card, side, className = '', fallbackClassName = '', placeholder = '', htmlOverride = '', textOverride = '' }) {
+  const explicitHtml = htmlOverride || getCardSideHtml(card, side)
+  const rawText = textOverride || getCardSideText(card, side) || placeholder
+  const text = side === 'front' ? (stripAnswerSectionFromText(rawText) || rawText) : rawText
   const html = explicitHtml || (card?.template === 'html' && looksLikeHtml(text) ? text : '')
   const fallbackText = isScriptCallText(text)
     ? '这张 Anki 卡依赖脚本或加密模板，无法直接显示。请删除后用新版导入重新尝试。'
     : text
 
   if (html) {
-    const safeHtml = sanitizeCardHtml(html)
+    const safeHtml = side === 'front'
+      ? stripAnswerSectionFromHtml(sanitizeCardHtml(html))
+      : sanitizeCardHtml(html)
     const hasRenderableHtml = safeHtml.trim()
       && (htmlToPlainText(safeHtml) || /<(?:img|audio|video|table|ul|ol|ruby|math|svg)\b/i.test(safeHtml))
     const scopeId = sanitizeCssScopeId(`${card?.id ?? 'preview'}-${side}`)
@@ -549,7 +697,63 @@ function CardContent({ card, side, className = '', fallbackClassName = '', place
 }
 
 function hasStoredCardHtml(card) {
-  return Boolean(card?.frontHtml || card?.backHtml || card?.cardCss)
+  return Boolean(card?.frontHtml || card?.backHtml || card?.cardCss || getCardHtmlSections(card).length > 0)
+}
+
+function getReviewReps(review) {
+  const reps = Number(review?.reps ?? 0)
+  return Number.isFinite(reps) ? reps : 0
+}
+
+function getCardReviewReps(card) {
+  return getReviewReps(card?.review)
+}
+
+function makeNewCardReview(review = {}) {
+  const { dueAt, ...rest } = review ?? {}
+  return {
+    ...rest,
+    dueDate: '',
+    interval: Number(rest.interval ?? 0) || 0,
+    ease: Number(rest.ease ?? 2.5) || 2.5,
+    reps: 0,
+    lapses: Number(rest.lapses ?? 0) || 0,
+    lastGrade: rest.lastGrade ?? null,
+  }
+}
+
+function hasStartedCard(card) {
+  return getCardReviewReps(card) > 0
+}
+
+function isNewCard(card) {
+  return !hasStartedCard(card)
+}
+
+function normalizeImportedAnkiCards(data) {
+  let changed = false
+  const cards = data.cards.map((card) => {
+    const patch = {}
+    const reps = getCardReviewReps(card)
+
+    if (reps === 0 && (card.review?.dueDate || card.review?.dueAt || card.review?.reps !== 0)) {
+      patch.review = makeNewCardReview(card.review)
+    }
+
+    if (card?.source?.type === 'apkg') {
+      const nextFront = stripAnswerSectionFromText(card.front)
+      const nextFrontHtml = card.frontHtml ? stripAnswerSectionFromHtml(card.frontHtml) : card.frontHtml
+
+      if (nextFront && nextFront !== card.front) patch.front = nextFront
+      if (nextFrontHtml && nextFrontHtml !== card.frontHtml) patch.frontHtml = nextFrontHtml
+    }
+
+    if (Object.keys(patch).length === 0) return card
+    changed = true
+    return { ...card, ...patch }
+  })
+
+  return changed ? { ...data, cards } : data
 }
 
 function getReviewDueTime(review) {
@@ -565,7 +769,75 @@ function getReviewDueTime(review) {
 }
 
 function isReviewDue(review) {
-  return getReviewDueTime(review) <= Date.now()
+  const dueTime = getReviewDueTime(review)
+  return getReviewReps(review) > 0 && dueTime > 0 && dueTime <= Date.now()
+}
+
+function isCardDue(card) {
+  return hasStartedCard(card) && isReviewDue(card?.review)
+}
+
+function getCardReviewStateLabel(card) {
+  if (!hasStartedCard(card)) return '新卡'
+  return isCardDue(card) ? '到期' : formatReviewDueLabel(card.review)
+}
+
+function isBuiltinDylItem(item) {
+  return item?.builtinPack === BUILTIN_DYL_PACK_ID || item?.source?.builtinPack === BUILTIN_DYL_PACK_ID
+}
+
+function stripBuiltinDylItems(data) {
+  return {
+    ...data,
+    decks: data.decks.filter((deck) => !isBuiltinDylItem(deck)),
+    cards: data.cards.filter((card) => !isBuiltinDylItem(card)),
+  }
+}
+
+function makeBuiltinCardOverride(baseCard, patch = {}) {
+  return {
+    id: baseCard.id,
+    deckId: baseCard.deckId,
+    builtinPack: BUILTIN_DYL_PACK_ID,
+    createdAt: baseCard.createdAt,
+    review: baseCard.review ?? { dueDate: '', interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
+    favorite: Boolean(baseCard.favorite),
+    flagged: Boolean(baseCard.flagged),
+    flagColor: getCardFlagColor(baseCard),
+    comment: baseCard.comment ?? '',
+    annotations: getCardAnnotations(baseCard),
+    links: getCardLinks(baseCard),
+    ...patch,
+    updatedAt: Date.now(),
+  }
+}
+
+function mergeBuiltinDylData(data, bundle, signedIn) {
+  const cleanData = stripBuiltinDylItems(data)
+  if (!signedIn || !bundle?.loaded) return cleanData
+
+  const overrides = new Map(data.cards.filter(isBuiltinDylItem).map((card) => [card.id, card]))
+  const mergedCards = bundle.cards.map((baseCard) => {
+    const override = overrides.get(baseCard.id)
+    if (!override) return baseCard
+    return {
+      ...baseCard,
+      review: override.review ?? baseCard.review,
+      favorite: Boolean(override.favorite),
+      flagged: Boolean(override.flagged),
+      flagColor: getCardFlagColor(override),
+      comment: override.comment ?? '',
+      annotations: getCardAnnotations(override),
+      links: getCardLinks(override),
+      updatedAt: override.updatedAt,
+    }
+  })
+
+  return {
+    ...cleanData,
+    decks: [...bundle.decks, ...cleanData.decks],
+    cards: [...mergedCards, ...cleanData.cards],
+  }
 }
 
 function formatReviewDueLabel(review) {
@@ -589,6 +861,7 @@ function makeLocalCacheData(data) {
         delete lightCard.frontHtml
         delete lightCard.backHtml
         delete lightCard.cardCss
+        delete lightCard.htmlSections
         return lightCard
       })
       : [],
@@ -606,6 +879,19 @@ function persistDataToLocalCache(data) {
       console.warn('Local cache write skipped because browser storage is full.', fallbackError)
     }
   }
+}
+
+function getInitialTheme() {
+  if (typeof window === 'undefined') return 'light'
+
+  try {
+    const savedTheme = localStorage.getItem(APP_THEME_STORAGE_KEY)
+    if (savedTheme === 'dark' || savedTheme === 'light') return savedTheme
+  } catch {
+    // Ignore storage failures and fall back to the system preference.
+  }
+
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 function toLocalDateKey(value = new Date()) {
@@ -1354,6 +1640,7 @@ function AuthDialog({ open, cloud, onClose }) {
 }
 
 function Shell({ children, data, cloud, studyDeckId }) {
+  const { theme, toggleTheme } = useContext(ThemeContext)
   const summary = stats(data)
   const firstDeckId = studyDeckId ?? data.decks[0]?.id
   const latestSyncAt = cloud.lastWriteAt ?? cloud.lastReadAt ?? cloud.lastSyncedAt
@@ -1387,6 +1674,7 @@ function Shell({ children, data, cloud, studyDeckId }) {
       : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
+  const isDarkTheme = theme === 'dark'
 
   const navItems = [
     { to: '/decks', icon: LayoutDashboard, label: '卡组' },
@@ -1439,6 +1727,15 @@ function Shell({ children, data, cloud, studyDeckId }) {
                 <span className="hidden sm:inline">待复习</span>
                 <span>{summary.dueToday}</span>
               </span>
+              <button
+                type="button"
+                onClick={toggleTheme}
+                title={isDarkTheme ? '切换到浅色' : '切换到深色'}
+                aria-label={isDarkTheme ? '切换到浅色' : '切换到深色'}
+                className="grid h-8 w-8 place-items-center rounded-xl text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
+              >
+                {isDarkTheme ? <Sun size={14} /> : <Moon size={14} />}
+              </button>
             {cloud.enabled && cloud.user ? (
               <button
                 type="button"
@@ -1493,14 +1790,14 @@ function Shell({ children, data, cloud, studyDeckId }) {
 function Dashboard({ data, onOpenCreateDeck, studyDeckId, cloud }) {
   const navigate = useNavigate()
   const summary = stats(data)
-  const dueCards = data.cards.filter((card) => card.review.dueDate <= todayKey())
+  const dueCards = data.cards.filter(isCardDue)
   const deckRows = data.decks.map((deck) => {
     const cards = data.cards.filter((card) => card.deckId === deck.id)
     return {
       ...deck,
       total: cards.length,
-      due: cards.filter((card) => card.review.dueDate <= todayKey()).length,
-      newCount: cards.filter((card) => card.review.reps === 0).length,
+      due: cards.filter(isCardDue).length,
+      newCount: cards.filter(isNewCard).length,
     }
   })
 
@@ -2265,8 +2562,8 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteS
     return {
       ...deck,
       total: cards.length,
-      due: cards.filter((card) => card.review.dueDate <= todayKey()).length,
-      newCount: cards.filter((card) => card.review.reps === 0).length,
+      due: cards.filter(isCardDue).length,
+      newCount: cards.filter(isNewCard).length,
     }
   }), [data.cards, data.decks])
 
@@ -2514,15 +2811,590 @@ function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteS
   )
 }
 
-function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards }) {
+function BrowseWorktable({
+  data,
+  studyDeckId,
+  cloud,
+  onAddCardAnnotation,
+  onRemoveCardAnnotation,
+  onLinkCards,
+  onUnlinkCards,
+  onUpdateCardMeta,
+  onOpenCreateDeck,
+  onOpenEditDeck,
+  onDeleteDeck,
+}) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
+  const [selectedScopeKey, setSelectedScopeKey] = useState('all')
+  const [selectedCardId, setSelectedCardId] = useState(null)
+  const [selectedDeckId, setSelectedDeckId] = useState(initialDeckId)
+  const [query, setQuery] = useState('')
+  const [cardFilter, setCardFilter] = useState('all')
+  const [flagColorFilter, setFlagColorFilter] = useState('all')
+  const [expandedScopeKeys, setExpandedScopeKeys] = useState(() => new Set(['all']))
+  const [contextMenu, setContextMenu] = useState(null)
+  const [annotationType, setAnnotationType] = useState(ANNOTATION_TYPES[0])
+  const [annotationDraft, setAnnotationDraft] = useState('')
+  const [noteDraft, setNoteDraft] = useState('')
+  const [linkTargetId, setLinkTargetId] = useState('')
+  const initializedScopeRef = useRef(false)
+
+  const scopeTree = useMemo(() => buildBrowseScopeTree(data), [data])
+  const scopeNodes = useMemo(() => flattenScopeTree(scopeTree), [scopeTree])
+  const scopeNodeMap = useMemo(() => new Map(scopeNodes.map((node) => [node.key, node])), [scopeNodes])
+  const selectedScope = scopeNodeMap.get(selectedScopeKey) ?? scopeTree
+  const selectedScopeCardIds = useMemo(() => new Set(selectedScope.cardIds), [selectedScope])
+  const selectedScopeCards = useMemo(() => (
+    data.cards.filter((card) => selectedScope.key === 'all' || selectedScopeCardIds.has(card.id))
+  ), [data.cards, selectedScope.key, selectedScopeCardIds])
+  const scopeDeckIds = useMemo(() => Array.from(new Set([
+    ...selectedScope.deckIds,
+    ...selectedScopeCards.map((card) => card.deckId),
+  ].filter(Boolean))), [selectedScope.deckIds, selectedScopeCards])
+
+  useEffect(() => {
+    if (initializedScopeRef.current) return
+    const initialNode = initialDeckId ? findBestScopeNodeForDeck(scopeNodes, initialDeckId) : null
+    if (initialNode) setSelectedScopeKey(initialNode.key)
+    initializedScopeRef.current = true
+  }, [initialDeckId, scopeNodes])
+
+  useEffect(() => {
+    setExpandedScopeKeys((current) => {
+      const next = new Set(current)
+      next.add('all')
+      selectedScope.parts.forEach((_, index) => next.add(getScopeKey(selectedScope.parts.slice(0, index + 1))))
+      return next
+    })
+  }, [selectedScope.parts])
+
+  const visibleCards = useMemo(() => (
+    selectedScopeCards
+      .filter((card) => {
+        if (cardFilter === 'favorite') return Boolean(card.favorite)
+        if (cardFilter === 'flagged') return isCardFlagged(card)
+        return true
+      })
+      .filter((card) => flagColorFilter === 'all' || getCardFlagColor(card) === flagColorFilter)
+      .filter((card) => {
+        const keyword = query.trim().toLowerCase()
+        if (!keyword) return true
+        const deck = data.decks.find((item) => item.id === card.deckId)
+        const sectionText = getCardHtmlSections(card).map((section) => section.text).join(' ')
+        const scopeText = getCardScopeParts(card, new Map(data.decks.map((item) => [item.id, item]))).join(' ')
+        return `${card.front} ${card.back} ${sectionText} ${scopeText} ${deck ? getDeckOptionLabel(deck) : ''}`.toLowerCase().includes(keyword)
+      })
+  ), [cardFilter, data.decks, flagColorFilter, query, selectedScopeCards])
+  const visibleCardRows = useMemo(() => visibleCards.slice(0, BROWSE_CARD_RENDER_LIMIT), [visibleCards])
+  const selectedCard = visibleCards.find((card) => card.id === selectedCardId) ?? visibleCards[0] ?? null
+  const selectedDeck = data.decks.find((deck) => deck.id === (selectedCard?.deckId ?? selectedDeckId))
+  const selectedAnnotations = getCardAnnotations(selectedCard)
+  const linkedCards = selectedCard ? getCardLinks(selectedCard).map((id) => data.cards.find((card) => card.id === id)).filter(Boolean) : []
+  const relatedSuggestions = getRelatedSuggestions(data, selectedCard)
+  const linkableCards = data.cards.filter((card) => card.id !== selectedCard?.id && !getCardLinks(selectedCard).includes(card.id))
+  const selectedScopeDeckId = selectedCard?.deckId ?? scopeDeckIds[0] ?? selectedDeckId ?? data.decks[0]?.id ?? ''
+  const contextCard = contextMenu?.type === 'card' ? data.cards.find((card) => card.id === contextMenu.cardId) : null
+  const contextScope = contextMenu?.type === 'scope' ? scopeNodeMap.get(contextMenu.scopeKey) : null
+  const contextDecks = contextScope ? contextScope.deckIds.map((id) => data.decks.find((deck) => deck.id === id)).filter(Boolean) : []
+  const editableContextDecks = contextDecks.filter((deck) => !isBuiltinDylItem(deck))
+  const contextTargetDeckId = contextCard?.deckId
+    ?? (contextScope?.cardIds?.[0] ? data.cards.find((card) => card.id === contextScope.cardIds[0])?.deckId : '')
+    ?? contextScope?.deckIds?.[0]
+    ?? selectedScopeDeckId
+
+  useEffect(() => {
+    setSelectedCardId((current) => {
+      if (visibleCards.some((card) => card.id === current)) return current
+      return visibleCards[0]?.id ?? null
+    })
+  }, [visibleCards])
+
+  useEffect(() => {
+    setNoteDraft(selectedCard?.comment ?? '')
+    setAnnotationDraft('')
+    setLinkTargetId('')
+    if (selectedCard?.deckId) setSelectedDeckId(selectedCard.deckId)
+  }, [selectedCard?.comment, selectedCard?.deckId, selectedCard?.id])
+
+  useEffect(() => {
+    function closeMenu() {
+      setContextMenu(null)
+    }
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [])
+
+  function selectScope(node) {
+    setSelectedScopeKey(node.key)
+    const firstCard = data.cards.find((card) => node.key === 'all' || node.cardIds.includes(card.id))
+    setSelectedDeckId(firstCard?.deckId ?? node.deckIds[0] ?? data.decks[0]?.id ?? '')
+  }
+
+  function toggleScopeExpanded(key) {
+    setExpandedScopeKeys((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      next.add('all')
+      return next
+    })
+  }
+
+  function openContextMenu(event, payload) {
+    event.preventDefault()
+    event.stopPropagation()
+    setContextMenu({ ...payload, x: event.clientX, y: event.clientY })
+  }
+
+  function openCreateChapter(node, child = false) {
+    const parts = node?.parts ?? []
+    const section = parts[0] ?? ''
+    const chapterParts = child ? parts.slice(1) : parts.slice(1, -1)
+    onOpenCreateDeck?.({
+      section,
+      chapter: chapterParts.join(' / '),
+      name: '',
+      description: '',
+    })
+    setContextMenu(null)
+  }
+
+  function deleteContextDecks() {
+    if (editableContextDecks.length === 0) return
+    const confirmed = window.confirm(`确定删除 ${editableContextDecks.length} 个本地章节/卡组吗？其中的本地卡片也会一起删除。`)
+    if (!confirmed) return
+    editableContextDecks.forEach((deck) => onDeleteDeck?.(deck.id))
+    setContextMenu(null)
+  }
+
+  function setCardFlagColor(card, color) {
+    onUpdateCardMeta?.(card.id, { flagged: Boolean(color), flagColor: color || '' })
+  }
+
+  function toggleCardFavorite(card) {
+    onUpdateCardMeta?.(card.id, { favorite: !card.favorite })
+  }
+
+  function handleAddAnnotation() {
+    const text = annotationDraft.trim()
+    if (!selectedCard || !text) return
+    onAddCardAnnotation(selectedCard.id, { type: annotationType, text })
+    setAnnotationDraft('')
+  }
+
+  function handleLinkCard(targetId = linkTargetId) {
+    if (!selectedCard || !targetId) return
+    onLinkCards(selectedCard.id, targetId)
+    setLinkTargetId('')
+  }
+
+  function saveCardNote() {
+    if (!selectedCard) return
+    onUpdateCardMeta?.(selectedCard.id, { comment: noteDraft.trim() })
+  }
+
+  function navigateToStudyScope() {
+    if (!selectedScopeDeckId) return
+    const suffix = selectedScope.key === 'all' ? '' : `?scope=${encodeURIComponent(selectedScope.key)}`
+    navigate(`/study/${selectedScopeDeckId}${suffix}`, { state: { scopeKey: selectedScope.key } })
+  }
+
+  function renderScopeNode(node) {
+    const expanded = expandedScopeKeys.has(node.key)
+    const selected = selectedScope.key === node.key
+    const hasChildren = node.children.length > 0
+    return (
+      <div key={node.key}>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => selectScope(node)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              selectScope(node)
+            }
+          }}
+          onContextMenu={(event) => openContextMenu(event, { type: 'scope', scopeKey: node.key })}
+          className={`group flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${selected ? 'bg-green-50 text-green-700 font-black' : 'text-gray-700 hover:bg-gray-50'}`}
+          style={{ paddingLeft: `${Math.min(8 + node.depth * 12, 44)}px` }}
+        >
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              if (hasChildren) toggleScopeExpanded(node.key)
+            }}
+            className={`grid h-5 w-5 shrink-0 place-items-center rounded text-gray-300 ${hasChildren ? 'hover:bg-white hover:text-gray-600' : 'opacity-0'}`}
+            tabIndex={-1}
+          >
+            <ChevronRight size={13} className={expanded ? 'rotate-90 transition-transform' : 'transition-transform'} />
+          </button>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{node.label}</span>
+          </span>
+          <span className="shrink-0 text-[11px] font-bold text-gray-400">{node.count}</span>
+          <MoreVertical size={13} className="shrink-0 text-gray-300 opacity-0 group-hover:opacity-100" />
+        </div>
+        {hasChildren && expanded && (
+          <div className="mt-0.5">
+            {node.children.map(renderScopeNode)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const menuStyle = contextMenu ? {
+    left: Math.min(contextMenu.x, Math.max(8, window.innerWidth - 232)),
+    top: Math.min(contextMenu.y, Math.max(8, window.innerHeight - 320)),
+  } : {}
+
+  const scopeDue = selectedScopeCards.filter(isCardDue).length
+  const scopeNew = selectedScopeCards.filter(isNewCard).length
+  const scopeStarted = selectedScopeCards.filter(hasStartedCard).length
+
+  return (
+    <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
+      <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-gray-950">浏览</h1>
+          <p className="mt-1 text-xs text-gray-500">按资料包、科目、章、节逐级查看；右键目录或卡片可以快速整理。</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => selectedScopeDeckId && navigate(`/cards/new/${selectedScopeDeckId}`)} className="h-10 rounded-xl bg-[#007aff] px-4 text-sm font-bold text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={!selectedScopeDeckId}>添加卡片</button>
+          <button onClick={navigateToStudyScope} className="h-10 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300" disabled={!selectedScopeDeckId}>学习</button>
+        </div>
+      </header>
+
+      <div className="grid min-h-[720px] grid-cols-1 gap-4 xl:grid-cols-[310px_minmax(0,1fr)_390px]">
+        <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
+          <div className="flex h-12 items-center justify-between border-b border-gray-200 px-4">
+            <div>
+              <h2 className="text-sm font-black text-gray-950">目录</h2>
+              <p className="text-[11px] font-bold text-gray-400">{scopeTree.count} 张卡片</p>
+            </div>
+            <button type="button" onClick={() => openCreateChapter(scopeTree, true)} className="grid h-8 w-8 place-items-center rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200" title="新建章节">
+              <Plus size={15} />
+            </button>
+          </div>
+          <div className="max-h-[670px] overflow-auto p-2">
+            {renderScopeNode(scopeTree)}
+          </div>
+        </aside>
+
+        <main className="min-w-0">
+          <section className="mb-3 overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
+            <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <p className="mb-1 text-[11px] font-black text-gray-300">当前目录</p>
+                <h2 className="truncate text-lg font-black text-gray-950">{selectedScope.pathLabel}</h2>
+                <p className="mt-1 text-xs font-bold text-gray-400">{selectedScope.count} 张 · 新卡 {scopeNew} · 到期 {scopeDue} · 已学 {scopeStarted}</p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button type="button" onClick={() => openCreateChapter(selectedScope, true)} className="h-9 rounded-xl bg-green-50 px-3 text-xs font-black text-green-700 hover:bg-green-100">插入子章节</button>
+                <button type="button" onClick={navigateToStudyScope} className="h-9 rounded-xl bg-[#34c759] px-4 text-xs font-black text-white hover:bg-[#30b454] disabled:bg-gray-300" disabled={!selectedScopeDeckId}>开始学习 {scopeDue || scopeNew || selectedScope.count}</button>
+              </div>
+            </div>
+          </section>
+
+          <section className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
+            <div className="border-b border-gray-200 px-3 py-3">
+              <div className="flex items-center gap-3">
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="关键词或标签搜索卡片"
+                  className="h-10 min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#007aff] focus:bg-white"
+                />
+                <span className="shrink-0 text-xs font-bold text-gray-400">{visibleCards.length} 张</span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-black">
+                {[
+                  { value: 'all', label: '全部' },
+                  { value: 'favorite', label: '星标' },
+                  { value: 'flagged', label: '旗帜' },
+                ].map((filter) => (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    onClick={() => setCardFilter(filter.value)}
+                    className={`h-8 rounded-lg px-3 transition-colors ${cardFilter === filter.value ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800'}`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+                <span className="mx-1 h-5 w-px bg-gray-200" />
+                <button
+                  type="button"
+                  onClick={() => setFlagColorFilter('all')}
+                  className={`h-8 rounded-lg px-3 ${flagColorFilter === 'all' ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                >
+                  全部旗色
+                </button>
+                {FLAG_COLOR_OPTIONS.map((color) => (
+                  <button
+                    key={color.value}
+                    type="button"
+                    onClick={() => {
+                      setCardFilter('flagged')
+                      setFlagColorFilter(color.value)
+                    }}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 ${flagColorFilter === color.value ? getFlagColorClass(color.value) : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                  >
+                    <Flag size={13} fill={flagColorFilter === color.value ? 'currentColor' : 'none'} />
+                    {color.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="max-h-[600px] overflow-auto bg-gray-50/70 p-3">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                {visibleCardRows.map((card) => {
+                  const flagColor = getCardFlagColor(card)
+                  return (
+                    <article
+                      key={card.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedCardId(card.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setSelectedCardId(card.id)
+                        }
+                      }}
+                      onContextMenu={(event) => openContextMenu(event, { type: 'card', cardId: card.id })}
+                      className={`flex min-h-[158px] cursor-pointer flex-col rounded-lg border px-3 py-3 text-left shadow-sm transition-colors ${selectedCard?.id === card.id ? 'border-green-200 bg-green-50/90' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="line-clamp-2 text-sm font-black leading-5 text-gray-950">{card.front}</h3>
+                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black ${isNewCard(card) ? 'bg-blue-50 text-blue-600' : isCardDue(card) ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                          {getCardReviewStateLabel(card)}
+                        </span>
+                      </div>
+                      <p className="mt-2 line-clamp-4 flex-1 text-xs leading-5 text-gray-500">{card.back}</p>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-[11px] font-bold text-gray-300">{hasStoredCardHtml(card) ? 'HTML' : '文本'} · {getCardScopeParts(card, new Map(data.decks.map((deck) => [deck.id, deck]))).at(-1)}</span>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              toggleCardFavorite(card)
+                            }}
+                            className={`grid h-7 w-7 place-items-center rounded-lg ${card.favorite ? 'bg-yellow-50 text-yellow-500' : 'text-gray-300 hover:bg-gray-100 hover:text-yellow-500'}`}
+                            title={card.favorite ? '取消星标' : '星标'}
+                          >
+                            <Star size={15} fill={card.favorite ? 'currentColor' : 'none'} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setCardFlagColor(card, flagColor ? '' : 'red')
+                            }}
+                            className={`grid h-7 w-7 place-items-center rounded-lg ${flagColor ? getFlagColorClass(flagColor) : 'text-gray-300 hover:bg-gray-100 hover:text-red-500'}`}
+                            title={flagColor ? '取消旗帜' : '旗帜'}
+                          >
+                            <Flag size={15} fill={flagColor ? 'currentColor' : 'none'} />
+                          </button>
+                        </span>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+              {visibleCards.length > visibleCardRows.length && (
+                <p className="px-3 py-4 text-center text-xs font-bold text-gray-400">已显示前 {visibleCardRows.length} 张，继续搜索可以缩小范围。</p>
+              )}
+              {visibleCards.length === 0 && <p className="py-12 text-center text-sm text-gray-400">没有匹配的卡片。</p>}
+            </div>
+          </section>
+        </main>
+
+        <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
+          <div className="flex h-12 items-center justify-between gap-3 border-b border-gray-200 px-4">
+            <h2 className="text-sm font-black text-gray-950">预览</h2>
+            <span className="truncate text-xs font-bold text-gray-400">{selectedDeck ? getDeckPath(selectedDeck) : selectedScope.pathLabel}</span>
+          </div>
+          {selectedCard ? (
+            <div className="max-h-[670px] overflow-auto p-4">
+              <div className="mb-3 flex items-center gap-2">
+                {selectedCard.favorite && <span className="rounded-lg bg-yellow-50 px-2 py-1 text-[11px] font-black text-yellow-700">星标</span>}
+                {isCardFlagged(selectedCard) && <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-black ${getFlagColorClass(getCardFlagColor(selectedCard))}`}><Flag size={12} fill="currentColor" />旗帜</span>}
+              </div>
+              <p className="mb-2 text-xs font-bold text-gray-400">Front</p>
+              <CardContent
+                card={selectedCard}
+                side="front"
+                className="text-base font-black leading-relaxed text-gray-950 break-words"
+                fallbackClassName="text-base font-black leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
+              />
+              <div className="my-5 h-px bg-gray-200" />
+              <p className="mb-2 text-xs font-bold text-gray-400">Back</p>
+              <CardContent
+                card={selectedCard}
+                side="back"
+                className="text-sm leading-relaxed text-gray-700 break-words"
+                fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
+              />
+
+              <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
+                <span className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">间隔 {selectedCard.review?.interval ?? 0} 天</span>
+                <span className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">复习 {selectedCard.review?.reps ?? 0} 次</span>
+              </div>
+
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-black text-gray-950">我的笔记</h3>
+                  <button type="button" onClick={saveCardNote} className="h-7 rounded-lg bg-gray-900 px-3 text-[11px] font-black text-white disabled:bg-gray-300" disabled={noteDraft.trim() === (selectedCard.comment ?? '')}>保存</button>
+                </div>
+                <textarea
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  placeholder="写下这张卡自己的理解、易错点或补充材料"
+                  className="min-h-[88px] w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 outline-none focus:border-[#007aff] focus:bg-white"
+                />
+              </div>
+
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-black text-gray-950">批注</h3>
+                  <span className="text-xs font-bold text-gray-300">{selectedAnnotations.length}</span>
+                </div>
+                <div className="flex gap-2">
+                  <select value={annotationType} onChange={(event) => setAnnotationType(event.target.value)} className="h-9 w-24 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs font-bold text-gray-600 outline-none focus:border-[#007aff] focus:bg-white">
+                    {ANNOTATION_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                  <input value={annotationDraft} onChange={(event) => setAnnotationDraft(event.target.value)} placeholder="补一句理解、易错或口诀" className="h-9 min-w-0 flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs outline-none focus:border-[#007aff] focus:bg-white" />
+                  <button type="button" onClick={handleAddAnnotation} className="h-9 rounded-lg bg-gray-900 px-3 text-xs font-bold text-white disabled:bg-gray-300" disabled={!annotationDraft.trim()}>保存</button>
+                </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  {selectedAnnotations.length === 0 && <p className="text-xs text-gray-400">还没有批注。</p>}
+                  {selectedAnnotations.map((annotation) => (
+                    <div key={annotation.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="rounded bg-white px-2 py-0.5 text-[10px] font-black text-green-700">{annotation.type}</span>
+                        <button type="button" onClick={() => onRemoveCardAnnotation(selectedCard.id, annotation.id)} className="text-[11px] font-bold text-gray-300 hover:text-red-500">删除</button>
+                      </div>
+                      <p className="text-xs leading-relaxed text-gray-700">{annotation.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-black text-gray-950">关联卡</h3>
+                  <span className="text-xs font-bold text-gray-300">{linkedCards.length}</span>
+                </div>
+                <div className="flex gap-2">
+                  <select value={linkTargetId} onChange={(event) => setLinkTargetId(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-gray-200 bg-gray-50 px-2 text-xs font-semibold text-gray-600 outline-none focus:border-[#007aff] focus:bg-white">
+                    <option value="">选择一张卡串联</option>
+                    {groupDecksBySection(data.decks).map((group) => (
+                      <optgroup key={group.section} label={group.section}>
+                        {group.decks.flatMap((deck) => data.cards
+                          .filter((card) => card.deckId === deck.id && linkableCards.some((item) => item.id === card.id))
+                          .map((card) => <option key={card.id} value={card.id}>{deck.name} / {card.front}</option>))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <button type="button" onClick={() => handleLinkCard()} className="h-9 rounded-lg bg-gray-900 px-3 text-xs font-bold text-white disabled:bg-gray-300" disabled={!linkTargetId}>串联</button>
+                </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  {linkedCards.map((card) => (
+                    <div key={card.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <button type="button" onClick={() => setSelectedCardId(card.id)} className="text-left text-xs font-bold leading-relaxed text-gray-800 hover:text-[#007aff]">{card.front}</button>
+                        <button type="button" onClick={() => onUnlinkCards(selectedCard.id, card.id)} className="shrink-0 text-[11px] font-bold text-gray-300 hover:text-red-500">断开</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {relatedSuggestions.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-[11px] font-black text-gray-300">可能相关</p>
+                    <div className="flex flex-col gap-2">
+                      {relatedSuggestions.map((card) => (
+                        <button key={card.id} type="button" onClick={() => handleLinkCard(card.id)} className="rounded-lg border border-dashed border-gray-200 px-3 py-2 text-left text-xs font-bold text-gray-500 hover:border-green-200 hover:bg-green-50 hover:text-green-700">{card.front}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="py-10 text-center text-sm text-gray-400">选择一张卡片查看预览。</p>
+          )}
+        </aside>
+      </div>
+
+      {contextMenu && (
+        <div className="fixed z-50 w-56 rounded-xl border border-gray-200 bg-white p-1.5 text-xs font-bold text-gray-700 shadow-2xl" style={menuStyle} onClick={(event) => event.stopPropagation()}>
+          {contextCard ? (
+            <>
+              <button type="button" onClick={() => { toggleCardFavorite(contextCard); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <Star size={14} fill={contextCard.favorite ? 'currentColor' : 'none'} className={contextCard.favorite ? 'text-yellow-500' : 'text-gray-400'} />
+                {contextCard.favorite ? '取消星标' : '设为星标'}
+              </button>
+              <div className="my-1 h-px bg-gray-100" />
+              {FLAG_COLOR_OPTIONS.map((color) => (
+                <button key={color.value} type="button" onClick={() => { setCardFlagColor(contextCard, color.value); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                  <Flag size={14} fill="currentColor" className={getFlagColorClass(color.value).replace('bg-', 'text-').split(' ')[1] ?? 'text-red-500'} />
+                  {color.label}
+                </button>
+              ))}
+              <button type="button" onClick={() => { setCardFlagColor(contextCard, ''); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-gray-400 hover:bg-gray-50">
+                <Flag size={14} />
+                清除旗帜
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={() => openCreateChapter(contextScope ?? scopeTree, true)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <Plus size={14} /> 新建子章节
+              </button>
+              <button type="button" onClick={() => openCreateChapter(contextScope ?? scopeTree, false)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <Layers3 size={14} /> 插入同级章节
+              </button>
+              <button type="button" onClick={() => contextTargetDeckId && navigate(`/cards/new/${contextTargetDeckId}`)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50 disabled:text-gray-300" disabled={!contextTargetDeckId}>
+                <PencilLine size={14} /> 在这里加卡
+              </button>
+              <div className="my-1 h-px bg-gray-100" />
+              <button type="button" onClick={() => { if (editableContextDecks[0]) onOpenEditDeck?.(editableContextDecks[0]); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50 disabled:text-gray-300" disabled={editableContextDecks.length !== 1}>
+                <PencilLine size={14} /> 编辑本地目录
+              </button>
+              <button type="button" onClick={deleteContextDecks} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-red-600 hover:bg-red-50 disabled:text-gray-300" disabled={editableContextDecks.length === 0}>
+                <Trash2 size={14} /> 删除本地目录
+              </button>
+              {contextDecks.length > 0 && editableContextDecks.length === 0 && <p className="px-3 py-2 text-[11px] leading-4 text-gray-400">内置资料目录不能直接删除，可以在旁边插入自己的章节。</p>}
+            </>
+          )}
+        </div>
+      )}
+    </Shell>
+  )
+}
+
+function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck }) {
   const location = useLocation()
   const navigate = useNavigate()
   const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
   const [selectedDeckId, setSelectedDeckId] = useState(initialDeckId)
   const [selectedCardId, setSelectedCardId] = useState(null)
   const [query, setQuery] = useState('')
+  const [cardFilter, setCardFilter] = useState('all')
   const [annotationType, setAnnotationType] = useState(ANNOTATION_TYPES[0])
   const [annotationDraft, setAnnotationDraft] = useState('')
+  const [noteDraft, setNoteDraft] = useState('')
   const [linkTargetId, setLinkTargetId] = useState('')
   const groupedDecks = useMemo(() => groupDecksBySection(data.decks), [data.decks])
 
@@ -2536,11 +3408,17 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
     data.cards
       .filter((card) => !selectedDeckId || card.deckId === selectedDeckId)
       .filter((card) => {
+        if (cardFilter === 'favorite') return Boolean(card.favorite)
+        if (cardFilter === 'flagged') return Boolean(card.flagged)
+        return true
+      })
+      .filter((card) => {
         const keyword = query.trim().toLowerCase()
         if (!keyword) return true
-        return `${card.front} ${card.back}`.toLowerCase().includes(keyword)
+        const sectionText = getCardHtmlSections(card).map((section) => section.text).join(' ')
+        return `${card.front} ${card.back} ${sectionText}`.toLowerCase().includes(keyword)
       })
-  ), [data.cards, query, selectedDeckId])
+  ), [cardFilter, data.cards, query, selectedDeckId])
   const visibleCardRows = useMemo(() => visibleCards.slice(0, BROWSE_CARD_RENDER_LIMIT), [visibleCards])
 
   const selectedCard = visibleCards.find((card) => card.id === selectedCardId) ?? visibleCards[0] ?? null
@@ -2559,8 +3437,9 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
 
   useEffect(() => {
     setAnnotationDraft('')
+    setNoteDraft(selectedCard?.comment ?? '')
     setLinkTargetId('')
-  }, [selectedCard?.id])
+  }, [selectedCard?.comment, selectedCard?.id])
 
   function handleAddAnnotation() {
     const text = annotationDraft.trim()
@@ -2573,6 +3452,37 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
     if (!selectedCard || !targetId) return
     onLinkCards(selectedCard.id, targetId)
     setLinkTargetId('')
+  }
+
+  function toggleCardFavorite(card) {
+    onUpdateCardMeta?.(card.id, { favorite: !card.favorite })
+  }
+
+  function toggleCardFlagged(card) {
+    onUpdateCardMeta?.(card.id, { flagged: !card.flagged })
+  }
+
+  function saveCardNote() {
+    if (!selectedCard) return
+    onUpdateCardMeta?.(selectedCard.id, { comment: noteDraft.trim() })
+  }
+
+  if (Array.isArray(data.cards)) {
+    return (
+      <BrowseWorktable
+        data={data}
+        studyDeckId={studyDeckId}
+        cloud={cloud}
+        onAddCardAnnotation={onAddCardAnnotation}
+        onRemoveCardAnnotation={onRemoveCardAnnotation}
+        onLinkCards={onLinkCards}
+        onUnlinkCards={onUnlinkCards}
+        onUpdateCardMeta={onUpdateCardMeta}
+        onOpenCreateDeck={onOpenCreateDeck}
+        onOpenEditDeck={onOpenEditDeck}
+        onDeleteDeck={onDeleteDeck}
+      />
+    )
   }
 
   return (
@@ -2620,7 +3530,8 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
         </aside>
 
         <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-          <div className="h-10 px-3 border-b border-gray-200 flex items-center gap-3">
+          <div className="border-b border-gray-200 px-3 py-2">
+            <div className="flex items-center gap-3">
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -2628,37 +3539,82 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
               className="h-9 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#007aff] focus:bg-white"
             />
             <span className="text-xs font-bold text-gray-400">{visibleCards.length} 张</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-black">
+              {[
+                { value: 'all', label: '全部' },
+                { value: 'favorite', label: '星标' },
+                { value: 'flagged', label: '旗帜' },
+              ].map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => setCardFilter(filter.value)}
+                  className={`h-7 rounded-lg px-2 transition-colors ${cardFilter === filter.value ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800'}`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="overflow-auto max-h-[580px]">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-3 py-2 font-bold">问题</th>
-                  <th className="text-left px-3 py-2 font-bold">答案</th>
-                  <th className="text-right px-3 py-2 font-bold">到期</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCardRows.map((card) => (
-                  <tr
+          <div className="max-h-[580px] overflow-auto bg-gray-50/60 p-2">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-3">
+              {visibleCardRows.map((card) => (
+                <div
                     key={card.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedCardId(card.id)}
-                    className={`cursor-pointer border-b border-gray-100 hover:bg-gray-50 ${selectedCard?.id === card.id ? 'bg-green-50/70' : ''}`}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedCardId(card.id)
+                      }
+                    }}
+                    className={`min-h-[150px] rounded-lg border bg-white px-3 py-3 text-left shadow-sm transition-colors ${selectedCard?.id === card.id ? 'border-green-200 bg-green-50/80' : 'border-gray-200 hover:border-gray-300 hover:bg-white'}`}
                   >
-                    <td className="px-3 py-2 font-bold text-gray-900 max-w-[220px] truncate">{card.front}</td>
-                    <td className="px-3 py-2 text-gray-500 max-w-[220px] truncate">{card.back}</td>
-                    <td className="px-3 py-2 text-right text-xs text-gray-400 whitespace-nowrap">{card.review.dueDate}</td>
-                  </tr>
-                ))}
-                {visibleCards.length > visibleCardRows.length && (
-                  <tr>
-                    <td colSpan={3} className="px-3 py-4 text-center text-xs font-bold text-gray-400">
-                      已显示前 {visibleCardRows.length} 张。继续输入关键词可以缩小范围。
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    <div className="flex items-start justify-between gap-3">
+                      <strong className="line-clamp-2 text-sm font-black leading-5 text-gray-950">{card.front}</strong>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black ${isNewCard(card) ? 'bg-blue-50 text-blue-600' : isCardDue(card) ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                        {getCardReviewStateLabel(card)}
+                      </span>
+                    </div>
+                    <p className="mt-2 line-clamp-4 text-xs leading-5 text-gray-500">{card.back}</p>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-gray-300">{hasStoredCardHtml(card) ? 'HTML' : '文本'}</span>
+                      <span className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            toggleCardFavorite(card)
+                          }}
+                          className={`grid h-7 w-7 place-items-center rounded-lg ${card.favorite ? 'bg-yellow-50 text-yellow-500' : 'text-gray-300 hover:bg-gray-100 hover:text-yellow-500'}`}
+                          title={card.favorite ? '取消星标' : '星标'}
+                        >
+                          <Star size={15} fill={card.favorite ? 'currentColor' : 'none'} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            toggleCardFlagged(card)
+                          }}
+                          className={`grid h-7 w-7 place-items-center rounded-lg ${card.flagged ? 'bg-red-50 text-red-500' : 'text-gray-300 hover:bg-gray-100 hover:text-red-500'}`}
+                          title={card.flagged ? '取消旗帜' : '旗帜'}
+                        >
+                          <Flag size={15} fill={card.flagged ? 'currentColor' : 'none'} />
+                        </button>
+                      </span>
+                    </div>
+                  </div>
+              ))}
+            </div>
+            {visibleCards.length > visibleCardRows.length && (
+              <p className="px-3 py-4 text-center text-xs font-bold text-gray-400">
+                已显示前 {visibleCardRows.length} 张。继续输入关键词可以缩小范围。
+              </p>
+            )}
             {visibleCards.length === 0 && <p className="text-sm text-gray-400 text-center py-10">没有匹配的卡片。</p>}
           </div>
         </section>
@@ -2688,6 +3644,26 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
               <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
                 <span className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">间隔 {selectedCard.review.interval} 天</span>
                 <span className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">复习 {selectedCard.review.reps} 次</span>
+              </div>
+
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-black text-gray-950">我的笔记</h3>
+                  <button
+                    type="button"
+                    onClick={saveCardNote}
+                    className="h-7 rounded-lg bg-gray-900 px-3 text-[11px] font-black text-white disabled:bg-gray-300"
+                    disabled={noteDraft.trim() === (selectedCard.comment ?? '')}
+                  >
+                    保存
+                  </button>
+                </div>
+                <textarea
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  placeholder="写下这张卡自己的理解、易错点或补充材料"
+                  className="min-h-[88px] w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 outline-none focus:border-[#007aff] focus:bg-white"
+                />
               </div>
 
               <div className="mt-6 border-t border-gray-100 pt-4">
@@ -3760,12 +4736,15 @@ function AddCard({ data, onCreateCard, studyDeckId, cloud }) {
   )
 }
 
-function Study({ data, onReviewCard, studyDeckId, cloud }) {
+function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
   const { deckId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [revealed, setRevealed] = useState(false)
   const [session, setSession] = useState({ reviewed: 0, grades: { 0: 0, 1: 0, 2: 0, 3: 0 } })
   const [studyMode, setStudyMode] = useState('due')
+  const [studyHtmlSection, setStudyHtmlSection] = useState('front')
+  const [studyNoteDraft, setStudyNoteDraft] = useState('')
   const [drillScope, setDrillScope] = useState('deck')
   const [drillSeed, setDrillSeed] = useState(() => Math.random())
   const [drillTargetDeckId, setDrillTargetDeckId] = useState(deckId ?? '')
@@ -3775,6 +4754,11 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
   const deck = data.decks.find((item) => item.id === deckId) ?? data.decks[0]
   const today = todayKey()
   const deckById = useMemo(() => new Map(data.decks.map((item) => [item.id, item])), [data.decks])
+  const studyScopeKey = useMemo(() => new URLSearchParams(location.search).get('scope') ?? location.state?.scopeKey ?? '', [location.search, location.state])
+  const studyScopeTree = useMemo(() => buildBrowseScopeTree(data), [data])
+  const studyScopeNodes = useMemo(() => flattenScopeTree(studyScopeTree), [studyScopeTree])
+  const studyScopeNode = studyScopeKey ? studyScopeNodes.find((node) => node.key === studyScopeKey) : null
+  const studyScopeCardIds = useMemo(() => new Set(studyScopeNode?.cardIds ?? []), [studyScopeNode])
   const masteredTodayCardIds = useMemo(() => new Set(getReviewLogs(data)
     .filter((log) => log.grade >= 2 && log.reviewedAt && new Date(log.reviewedAt).toISOString().slice(0, 10) === today)
     .map((log) => log.cardId)), [data, today])
@@ -3782,9 +4766,9 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
   const studyCards = useMemo(() => {
     if (!deck) return []
     return data.cards
-      .filter((card) => card.deckId === deck.id)
+      .filter((card) => (studyScopeNode ? studyScopeCardIds.has(card.id) : card.deckId === deck.id))
       .sort((a, b) => getReviewDueTime(a.review) - getReviewDueTime(b.review))
-  }, [data.cards, deck])
+  }, [data.cards, deck, studyScopeCardIds, studyScopeNode])
 
   const drillDeckOptions = useMemo(() => sortDecksByPath(data.decks).map((item) => ({
     id: item.id,
@@ -3792,29 +4776,21 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
     count: data.cards.filter((card) => card.deckId === item.id).length,
   })).filter((item) => item.count > 0), [data.cards, data.decks])
 
-  const drillChapterOptions = useMemo(() => {
-    const chapters = new Map()
-    for (const item of sortDecksByPath(data.decks)) {
-      const key = getDeckChapterKey(item)
-      const current = chapters.get(key) ?? {
-        value: key,
-        label: getDeckChapterLabel(item),
-        deckIds: [],
-        count: 0,
-      }
-      const count = data.cards.filter((card) => card.deckId === item.id).length
-      current.deckIds.push(item.id)
-      current.count += count
-      chapters.set(key, current)
-    }
-    return Array.from(chapters.values()).filter((item) => item.count > 0)
-  }, [data.cards, data.decks])
+  const drillChapterOptions = useMemo(() => studyScopeNodes
+    .filter((node) => node.key !== 'all' && node.count > 0 && node.depth >= 2)
+    .map((node) => ({
+      value: node.key,
+      label: node.pathLabel,
+      cardIds: node.cardIds,
+      count: node.count,
+    })), [studyScopeNodes])
 
   useEffect(() => {
     if (!deck) return
     setDrillTargetDeckId(deck.id)
-    setDrillTargetChapterKey(getDeckChapterKey(deck))
-  }, [deck?.id, deck])
+    const targetScope = studyScopeNode ?? findBestScopeNodeForDeck(studyScopeNodes, deck.id)
+    setDrillTargetChapterKey(targetScope?.key ?? drillChapterOptions[0]?.value ?? '')
+  }, [deck?.id, deck, drillChapterOptions, studyScopeNode, studyScopeNodes])
 
   useEffect(() => {
     setDismissedDrillCardIds(new Set())
@@ -3831,7 +4807,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
   }, [drillChapterOptions, drillTargetChapterKey])
 
   const drillCards = useMemo(() => {
-    const isAvailableForDrill = (card) => !dismissedDrillCardIds.has(card.id) && !masteredTodayCardIds.has(card.id)
+    const isAvailableForDrill = (card) => hasStartedCard(card) && !dismissedDrillCardIds.has(card.id) && !masteredTodayCardIds.has(card.id)
 
     if (drillScope === 'all') return [...data.cards]
       .filter(isAvailableForDrill)
@@ -3839,9 +4815,9 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
 
     if (drillScope === 'chapter') {
       const target = drillChapterOptions.find((item) => item.value === drillTargetChapterKey)
-      const targetDeckIds = new Set(target?.deckIds ?? [])
+      const targetCardIds = new Set(target?.cardIds ?? [])
       return data.cards
-        .filter((card) => targetDeckIds.has(card.deckId))
+        .filter((card) => targetCardIds.has(card.id))
         .filter(isAvailableForDrill)
         .sort((a, b) => String(a.front).localeCompare(String(b.front), 'zh-CN'))
     }
@@ -3858,24 +4834,43 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
     return drillCards[Math.floor(drillSeed * drillCards.length) % drillCards.length]
   }, [drillCards, drillSeed])
 
-  const queue = studyCards.filter((card) => isReviewDue(card.review))
+  const queue = studyCards.filter(isCardDue)
+  const newQueue = studyCards.filter(isNewCard)
   const dueCard = queue[0] ?? null
-  const activeCard = studyMode === 'drill' ? drillCard : dueCard ?? drillCard
+  const activeCard = studyMode === 'drill' ? drillCard : dueCard ?? newQueue[0] ?? drillCard
   const activeReview = useMemo(() => (
     activeCard?.review ?? { dueDate: today, interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null }
   ), [activeCard?.review, today])
-  const activeDeckPath = deck ? getDeckPath(deck) : ''
+  const activeDeckPath = studyScopeNode?.pathLabel ?? (deck ? getDeckPath(deck) : '')
   const activeCardDeck = activeCard ? deckById.get(activeCard.deckId) : null
   const activeCardDeckLabel = activeCardDeck ? getDeckOptionLabel(activeCardDeck) : activeDeckPath
-  const reviewedCards = studyCards.filter((card) => (card.review?.reps ?? 0) > 0).length
+  const reviewedCards = studyCards.filter(hasStartedCard).length
   const masteredCards = studyCards.filter((card) => (card.review?.interval ?? 0) >= 7).length
-  const newCards = studyCards.filter((card) => (card.review?.reps ?? 0) === 0).length
-  const remainingInSession = studyMode === 'drill' ? (activeCard ? 1 : 0) : queue.length || (activeCard ? 1 : 0)
+  const newCards = studyCards.filter(isNewCard).length
+  const remainingInSession = studyMode === 'drill' ? (activeCard ? 1 : 0) : (queue.length + newQueue.length) || (activeCard ? 1 : 0)
   const sessionTotal = session.reviewed + remainingInSession
   const progressPercent = sessionTotal > 0 ? Math.min(100, Math.round((session.reviewed / sessionTotal) * 100)) : 0
-  const activeIsDrill = Boolean(activeCard && (studyMode === 'drill' || !dueCard))
+  const activeIsDrill = Boolean(
+    activeCard
+      && drillCard
+      && activeCard.id === drillCard.id
+      && (studyMode === 'drill' || (!dueCard && !newQueue[0])),
+  )
   const lastGrade = STUDY_GRADE_OPTIONS.find((option) => option.grade === activeReview.lastGrade)
   const activeCardHasHtml = hasStoredCardHtml(activeCard)
+  const activeCardHtmlSections = getCardHtmlSections(activeCard)
+  const firstAnswerSectionKey = activeCardHtmlSections[0] ? `section:${activeCardHtmlSections[0].id}` : 'back'
+  const activeHtmlSection = activeCardHtmlSections.find((section) => `section:${section.id}` === studyHtmlSection)
+  const studyHtmlTabs = [
+    { key: 'front', label: '正面' },
+    ...(activeCardHtmlSections.length > 0
+      ? activeCardHtmlSections.map((section) => ({ key: `section:${section.id}`, label: section.label }))
+      : [{ key: 'back', label: '背面' }]),
+    { key: 'note', label: '学习笔记' },
+  ]
+  const activeCardStateLabel = activeCard ? getCardReviewStateLabel(activeCard) : ''
+  const activeCardNote = activeCard?.comment ?? ''
+  const studyNoteDirty = Boolean(activeCard) && studyNoteDraft.trim() !== activeCardNote
   const gradeOptionsWithDue = useMemo(() => STUDY_GRADE_OPTIONS.map((option) => ({
     ...option,
     dueLabel: formatReviewDueLabel(scheduleReview(activeReview, option.grade)),
@@ -3883,7 +4878,9 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
 
   useEffect(() => {
     setRevealed(false)
-  }, [activeCard?.id])
+    setStudyHtmlSection('front')
+    setStudyNoteDraft(activeCard?.comment ?? '')
+  }, [activeCard?.comment, activeCard?.id])
 
   useEffect(() => {
     canGradeRef.current = Boolean(activeCard && revealed)
@@ -3904,6 +4901,21 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
     setStudyMode('drill')
     setRevealed(false)
     setDrillSeed(Math.random())
+  }
+
+  const revealAnswer = useCallback(() => {
+    setRevealed(true)
+    if (activeCardHasHtml) setStudyHtmlSection(firstAnswerSectionKey)
+  }, [activeCardHasHtml, firstAnswerSectionKey])
+
+  function selectStudyHtmlSection(section) {
+    if (section !== 'front' && section !== 'note' && !revealed) setRevealed(true)
+    setStudyHtmlSection(section)
+  }
+
+  function saveStudyNote() {
+    if (!activeCard || !onUpdateCardMeta) return
+    onUpdateCardMeta(activeCard.id, { comment: studyNoteDraft.trim() })
   }
 
   const handleGrade = useCallback((grade) => {
@@ -3933,7 +4945,7 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
 
       if ((event.key === ' ' || event.key === 'Enter') && !revealed) {
         event.preventDefault()
-        setRevealed(true)
+        revealAnswer()
         return
       }
 
@@ -3947,7 +4959,29 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
 
     window.addEventListener('keydown', handleStudyShortcut)
     return () => window.removeEventListener('keydown', handleStudyShortcut)
-  }, [activeCard, handleGrade, revealed])
+  }, [activeCard, handleGrade, revealed, revealAnswer])
+
+  const studyNotePanel = activeCard ? (
+    <div className="mx-auto w-full max-w-2xl text-left">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-black text-gray-950">我的笔记</h3>
+        <button
+          type="button"
+          onClick={saveStudyNote}
+          className="h-8 rounded-lg bg-gray-900 px-3 text-[11px] font-black text-white disabled:bg-gray-300"
+          disabled={!studyNoteDirty || !onUpdateCardMeta}
+        >
+          保存
+        </button>
+      </div>
+      <textarea
+        value={studyNoteDraft}
+        onChange={(event) => setStudyNoteDraft(event.target.value)}
+        placeholder="写下这张卡的理解、易错点或补充材料"
+        className="min-h-[110px] w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm leading-6 text-gray-700 outline-none focus:border-[#007aff] focus:bg-white"
+      />
+    </div>
+  ) : null
 
   return (
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
@@ -4074,17 +5108,17 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
           </div>
         )}
         {activeCard && (
-          <motion.div key={activeCard.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl bg-white/90 border border-white shadow-sm mb-4 min-h-[460px] flex flex-col text-center overflow-hidden">
+          <motion.div key={activeCard.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl bg-white/90 border border-white shadow-sm mb-4 min-h-[460px] flex flex-col overflow-hidden ${activeCardHasHtml ? 'text-left' : 'text-center'}`}>
             <div className="h-10 border-b border-gray-200 px-4 flex items-center justify-between gap-3 text-xs text-gray-400">
               <span className="flex items-center gap-2">
                 {activeIsDrill ? 'Drill' : 'Front'}
                 {activeCardHasHtml && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-600">HTML</span>}
               </span>
-              <span className="truncate text-right">{activeCardDeckLabel} · 到期 {activeReview.dueDate}</span>
+              <span className="truncate text-right">{activeCardDeckLabel} · {activeCardStateLabel}</span>
             </div>
 
-            <div className="flex-1 p-10 flex flex-col justify-center">
-              <div className="mb-5 flex flex-wrap items-center justify-center gap-2 text-xs font-black">
+            <div className={`flex-1 flex flex-col ${activeCardHasHtml ? 'justify-start p-4 sm:p-6' : 'justify-center p-10'}`}>
+              <div className={`mb-5 flex flex-wrap items-center gap-2 text-xs font-black ${activeCardHasHtml ? 'justify-start' : 'justify-center'}`}>
                 {activeCard.favorite && <span className="rounded-lg bg-yellow-50 px-2 py-1 text-yellow-700">收藏</span>}
                 {activeCard.flagged && <span className="rounded-lg bg-red-50 px-2 py-1 text-red-600">重点</span>}
                 {lastGrade && <span className={`rounded-lg px-2 py-1 ${lastGrade.badgeClass}`}>上次 {lastGrade.title}</span>}
@@ -4092,29 +5126,72 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
                   <span key={tag} className="rounded-lg bg-gray-100 px-2 py-1 text-gray-500">{tag}</span>
                 ))}
               </div>
-              <CardContent
-                card={activeCard}
-                side="front"
-                className="mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words"
-                fallbackClassName="mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words whitespace-pre-wrap"
-              />
+              {activeCardHasHtml && (
+                <div className="mb-6 flex max-w-full flex-wrap justify-start gap-1 self-stretch rounded-xl bg-gray-100 p-1 text-xs font-black">
+                  {studyHtmlTabs.map((section) => (
+                    <button
+                      key={section.key}
+                      type="button"
+                      onClick={() => selectStudyHtmlSection(section.key)}
+                      className={`h-8 rounded-lg px-3 ${studyHtmlSection === section.key ? 'bg-white text-[#007aff] shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-              {!revealed ? (
-                <button type="button" onClick={() => setRevealed(true)} title="显示答案" className="mt-12 mx-auto h-11 w-[170px] rounded-xl bg-[#ff9f0a] text-white text-sm font-bold hover:bg-[#f59600]">显示答案</button>
-              ) : (
-                <div className="mt-10 pt-8 border-t border-gray-200">
-                  <p className="text-xs font-bold text-gray-400 mb-4">Back</p>
+              {activeCardHasHtml && studyHtmlSection === 'note' ? (
+                studyNotePanel
+              ) : activeCardHasHtml && activeHtmlSection && revealed ? (
+                <div className="mx-auto w-full max-w-full">
+                  <p className="text-xs font-bold text-gray-400 mb-4">{activeHtmlSection.label}</p>
                   <CardContent
                     card={activeCard}
                     side="back"
-                    className="mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words"
-                    fallbackClassName="mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words whitespace-pre-wrap"
+                    htmlOverride={activeHtmlSection.html}
+                    textOverride={activeHtmlSection.text}
+                    className="mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words"
+                    fallbackClassName="mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words whitespace-pre-wrap"
                   />
-                  {activeCard.comment && <p className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-left text-sm leading-relaxed text-gray-500">{activeCard.comment}</p>}
                 </div>
+              ) : (
+                <>
+                  {(!activeCardHasHtml || studyHtmlSection === 'front' || !revealed) && (
+                    <CardContent
+                      card={activeCard}
+                      side="front"
+                      className={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-900 leading-relaxed break-words' : 'mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words'}
+                      fallbackClassName={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-900 leading-relaxed break-words whitespace-pre-wrap' : 'mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words whitespace-pre-wrap'}
+                    />
+                  )}
+
+                  {!revealed ? (
+                    <button type="button" onClick={revealAnswer} title="显示答案" className="mt-12 mx-auto h-11 w-[170px] rounded-xl bg-[#ff9f0a] text-white text-sm font-bold hover:bg-[#f59600]">显示答案</button>
+                  ) : (
+                    (!activeCardHasHtml || studyHtmlSection === 'back') && (
+                      <div className={activeCardHasHtml ? '' : 'mt-10 pt-8 border-t border-gray-200'}>
+                        <p className="text-xs font-bold text-gray-400 mb-4">Back</p>
+                        <CardContent
+                          card={activeCard}
+                          side="back"
+                          className={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words' : 'mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words'}
+                          fallbackClassName={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words whitespace-pre-wrap' : 'mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words whitespace-pre-wrap'}
+                        />
+                        {!activeCardHasHtml && activeCard.comment && <p className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-left text-sm leading-relaxed text-gray-500">{activeCard.comment}</p>}
+                      </div>
+                    )
+                  )}
+                </>
               )}
             </div>
           </motion.div>
+        )}
+
+        {activeCard && !activeCardHasHtml && (
+          <section className="mb-4 rounded-2xl bg-white/90 border border-white shadow-sm p-4">
+            {studyNotePanel}
+          </section>
         )}
 
         {revealed && (
@@ -4142,11 +5219,16 @@ function Study({ data, onReviewCard, studyDeckId, cloud }) {
 
 export default function App() {
   const location = useLocation()
-  const initial = useMemo(() => loadData(), [])
+  const initial = useMemo(() => normalizeImportedAnkiCards(loadData()), [])
   const [data, setData] = useState(initial)
+  const [theme, setTheme] = useState(getInitialTheme)
   const [deckDialog, setDeckDialog] = useState({ open: false, mode: 'create', deck: null })
   const cloud = useCloudSync(data, setData)
-  const studyDeckId = data.decks[0]?.id ?? null
+  const [builtinDyl, setBuiltinDyl] = useState({ loaded: false, decks: [], cards: [] })
+  const signedIn = Boolean(cloud.user)
+  const appData = useMemo(() => normalizeImportedAnkiCards(mergeBuiltinDylData(data, builtinDyl, signedIn)), [builtinDyl, data, signedIn])
+  const builtinCardMap = useMemo(() => new Map(builtinDyl.cards.map((card) => [card.id, card])), [builtinDyl.cards])
+  const studyDeckId = appData.decks[0]?.id ?? null
   const focusSessionRef = useRef(null)
   const lastActiveAtRef = useRef(Date.now())
   const lastActivityTickAtRef = useRef(Date.now())
@@ -4154,6 +5236,67 @@ export default function App() {
     const match = location.pathname.match(/^\/study\/([^/]+)/)
     return match?.[1] ?? null
   }, [location.pathname])
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+  }, [])
+  const themeContextValue = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem(APP_THEME_STORAGE_KEY, theme)
+    } catch {
+      // Theme persistence is nice to have; the UI can still switch without it.
+    }
+  }, [theme])
+
+  useEffect(() => {
+    setData((current) => normalizeImportedAnkiCards(current))
+  }, [data.cards])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!signedIn) {
+      setBuiltinDyl({ loaded: false, decks: [], cards: [] })
+      return () => {
+        cancelled = true
+      }
+    }
+
+    fetch(BUILTIN_DYL_DATA_URL)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Failed to load ${BUILTIN_DYL_DATA_URL}`)
+        return response.json()
+      })
+      .then(async (bundle) => {
+        let cards = Array.isArray(bundle.cards) ? bundle.cards : []
+        if (Array.isArray(bundle.cardChunks) && bundle.cardChunks.length > 0) {
+          const bundleUrl = new URL(BUILTIN_DYL_DATA_URL, window.location.origin)
+          const chunkCards = await Promise.all(bundle.cardChunks.map(async (chunkPath) => {
+            const chunkUrl = new URL(chunkPath, bundleUrl)
+            const response = await fetch(chunkUrl)
+            if (!response.ok) throw new Error(`Failed to load ${chunkUrl.pathname}`)
+            const chunk = await response.json()
+            return Array.isArray(chunk.cards) ? chunk.cards : Array.isArray(chunk) ? chunk : []
+          }))
+          cards = chunkCards.flat()
+        }
+        if (cancelled) return
+        setBuiltinDyl({
+          loaded: true,
+          decks: Array.isArray(bundle.decks) ? bundle.decks : [],
+          cards,
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setBuiltinDyl({ loaded: false, decks: [], cards: [] })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [signedIn])
 
   useEffect(() => {
     persistDataToLocalCache(data)
@@ -4297,10 +5440,11 @@ export default function App() {
             ...(cardValue.frontHtml ? { frontHtml: cardValue.frontHtml } : {}),
             ...(cardValue.backHtml ? { backHtml: cardValue.backHtml } : {}),
             ...(cardValue.cardCss ? { cardCss: cardValue.cardCss } : {}),
+            ...(cardValue.htmlSections ? { htmlSections: cardValue.htmlSections } : {}),
             ...(cardValue.sourceKey ? { sourceKey: cardValue.sourceKey } : {}),
             ...(cardValue.source ? { source: cardValue.source } : {}),
             createdAt: Date.now(),
-            review: { dueDate: todayKey(), interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
+            review: makeNewCardReview(),
           },
           ...current.cards,
         ],
@@ -4358,6 +5502,7 @@ export default function App() {
             ...(card.frontHtml ? { frontHtml: card.frontHtml } : {}),
             ...(card.backHtml ? { backHtml: card.backHtml } : {}),
             ...(card.cardCss ? { cardCss: card.cardCss } : {}),
+            ...(card.htmlSections ? { htmlSections: card.htmlSections } : {}),
             ...(card.sourceKey ? { sourceKey: card.sourceKey } : {}),
             ...(card.source ? { source: card.source } : {}),
           }
@@ -4376,7 +5521,7 @@ export default function App() {
             id: `card-${createdAt}-${index}`,
             ...importedCard,
             createdAt: createdAt + index,
-            review: { dueDate: todayKey(), interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
+            review: makeNewCardReview(),
           }
         })
         const untouchedCards = current.cards.filter((card) => !((autoAnkiDecks || card.deckId === deckId) && updatedSourceKeys.has(card.sourceKey)))
@@ -4427,70 +5572,97 @@ export default function App() {
 
   function addCardAnnotation(cardId, annotationValue) {
     startTransition(() => {
-      setData((current) => ({
-        ...current,
-        cards: current.cards.map((card) => (card.id === cardId ? {
-          ...card,
-          annotations: [
-            {
-              id: `annotation-${Date.now()}`,
-              type: annotationValue.type,
-              text: annotationValue.text,
-              createdAt: Date.now(),
-            },
-            ...getCardAnnotations(card),
-          ],
-        } : card)),
+      patchCard(cardId, (card) => ({
+        annotations: [
+          {
+            id: `annotation-${Date.now()}`,
+            type: annotationValue.type,
+            text: annotationValue.text,
+            createdAt: Date.now(),
+          },
+          ...getCardAnnotations(card),
+        ],
       }))
     })
   }
 
   function removeCardAnnotation(cardId, annotationId) {
     startTransition(() => {
-      setData((current) => ({
-        ...current,
-        cards: current.cards.map((card) => (card.id === cardId ? {
-          ...card,
-          annotations: getCardAnnotations(card).filter((annotation) => annotation.id !== annotationId),
-        } : card)),
+      patchCard(cardId, (card) => ({
+        annotations: getCardAnnotations(card).filter((annotation) => annotation.id !== annotationId),
       }))
+    })
+  }
+
+  function patchCard(cardId, patcher) {
+    setData((current) => {
+      let found = false
+      const cards = current.cards.map((card) => {
+        if (card.id !== cardId) return card
+        found = true
+        const patch = typeof patcher === 'function' ? patcher(card) : patcher
+        return { ...card, ...patch, updatedAt: Date.now() }
+      })
+      if (found) return { ...current, cards }
+
+      const baseCard = builtinCardMap.get(cardId)
+      if (!baseCard) return current
+      const patch = typeof patcher === 'function' ? patcher(baseCard) : patcher
+      return {
+        ...current,
+        cards: [makeBuiltinCardOverride(baseCard, patch), ...current.cards],
+      }
+    })
+  }
+
+  function updateCardMeta(cardId, patch) {
+    startTransition(() => {
+      patchCard(cardId, patch)
     })
   }
 
   function linkCards(cardId, targetId) {
     if (cardId === targetId) return
     startTransition(() => {
-      setData((current) => ({
-        ...current,
-        cards: current.cards.map((card) => {
-          if (card.id === cardId) return { ...card, links: Array.from(new Set([...getCardLinks(card), targetId])) }
-          if (card.id === targetId) return { ...card, links: Array.from(new Set([...getCardLinks(card), cardId])) }
-          return card
-        }),
-      }))
+      patchCard(cardId, (card) => ({ links: Array.from(new Set([...getCardLinks(card), targetId])) }))
+      patchCard(targetId, (card) => ({ links: Array.from(new Set([...getCardLinks(card), cardId])) }))
     })
   }
 
   function unlinkCards(cardId, targetId) {
     startTransition(() => {
-      setData((current) => ({
-        ...current,
-        cards: current.cards.map((card) => {
-          if (card.id === cardId) return { ...card, links: getCardLinks(card).filter((id) => id !== targetId) }
-          if (card.id === targetId) return { ...card, links: getCardLinks(card).filter((id) => id !== cardId) }
-          return card
-        }),
-      }))
+      patchCard(cardId, (card) => ({ links: getCardLinks(card).filter((id) => id !== targetId) }))
+      patchCard(targetId, (card) => ({ links: getCardLinks(card).filter((id) => id !== cardId) }))
     })
   }
 
   function reviewCard(cardId, grade) {
     startTransition(() => {
-      setData((current) => ({
-        ...current,
-        cards: current.cards.map((card) => (card.id === cardId ? { ...card, review: scheduleReview(card.review, grade) } : card)),
-        reviewLogs: [{ id: `log-${Date.now()}`, cardId, grade, reviewedAt: Date.now() }, ...current.reviewLogs].slice(0, 100),
-      }))
+      const reviewedAt = Date.now()
+      setData((current) => {
+        let found = false
+        const cards = current.cards.map((card) => {
+          if (card.id !== cardId) return card
+          found = true
+          return { ...card, review: scheduleReview(card.review, grade), updatedAt: reviewedAt }
+        })
+
+        if (!found) {
+          const baseCard = builtinCardMap.get(cardId)
+          if (baseCard) {
+            cards.unshift(makeBuiltinCardOverride(baseCard, {
+              review: scheduleReview(baseCard.review, grade),
+              updatedAt: reviewedAt,
+            }))
+          }
+        }
+
+        return {
+          ...current,
+          cards,
+          reviewLogs: [{ id: `log-${reviewedAt}`, cardId, grade, reviewedAt }, ...current.reviewLogs].slice(0, 100),
+        }
+      })
     })
   }
 
@@ -4532,12 +5704,12 @@ export default function App() {
     })
   }
 
-  const existingNames = data.decks
+  const existingNames = appData.decks
     .filter((deck) => (deckDialog.mode === 'edit' && deckDialog.deck ? deck.id !== deckDialog.deck.id : true))
     .map((deck) => deck.name)
 
   return (
-    <>
+    <ThemeContext.Provider value={themeContextValue}>
       <DeckDialog
         open={deckDialog.open}
         mode={deckDialog.mode}
@@ -4548,16 +5720,16 @@ export default function App() {
       />
 
       <Routes>
-        <Route path="/" element={<Home data={data} cloud={cloud} />} />
-        <Route path="/app" element={<Dashboard data={data} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/decks" element={<Decks data={data} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/browse" element={<Browse data={data} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} />} />
-        <Route path="/organize" element={<Organize data={data} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/import" element={<ImportCards data={data} onCreateCards={createCards} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/profile" element={<Profile data={data} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />
-        <Route path="/cards/new/:deckId" element={<AddCard data={data} onCreateCard={createCard} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/study/:deckId" element={<Study data={data} onReviewCard={reviewCard} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/" element={<Home data={appData} cloud={cloud} />} />
+        <Route path="/app" element={<Dashboard data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/decks" element={<Decks data={appData} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} />} />
+        <Route path="/organize" element={<Organize data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/profile" element={<Profile data={appData} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />
+        <Route path="/cards/new/:deckId" element={<AddCard data={appData} onCreateCard={createCard} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/study/:deckId" element={<Study data={appData} onReviewCard={reviewCard} onUpdateCardMeta={updateCardMeta} studyDeckId={studyDeckId} cloud={cloud} />} />
       </Routes>
-    </>
+    </ThemeContext.Provider>
   )
 }
