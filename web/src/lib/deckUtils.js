@@ -137,4 +137,104 @@ function readFileAsDataUrl(file) {
     reader.readAsDataURL(file)
   })
 
-export { getDeckSection, getDeckChapter, getStableDeckColor }
+
+
+function getDeckPath(deck) {
+  const section = getDeckSection(deck)
+  const chapter = getDeckChapter(deck)
+  return chapter ? `${section} / ${chapter}` : section
+}
+
+function getDeckOptionLabel(deck) {
+  return `${getDeckPath(deck)} / ${deck.name}`
+}
+
+function normalizePathPart(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim()
+}
+
+function splitAnkiDeckPath(value = '') {
+  return String(value)
+    .split('::')
+    .map((part) => normalizePathPart(part))
+    .filter(Boolean)
+}
+
+function isAnkiMajorPathPart(value = '') {
+  return /^(?:[A-ZＡ-Ｚ]\s*)?(?:刑法学|民法学|法理学|宪法学|法制史|行政法|商经法|三国法|理论法|刑法|民法|宪法|法理|法条分析)/.test(normalizePathPart(value))
+}
+
+function findAnkiMajorPathIndex(sourcePath = []) {
+  const directIndex = sourcePath.findIndex(isAnkiMajorPathPart)
+  if (directIndex >= 0) return directIndex
+  return sourcePath.length >= 3 ? 1 : -1
+}
+
+function getAnkiDeckTarget(card, fallbackDeck) {
+  const sourcePath = Array.isArray(card?.source?.deckPath) && card.source.deckPath.length > 0
+    ? card.source.deckPath.map(normalizePathPart).filter(Boolean)
+    : splitAnkiDeckPath(card?.source?.deckName)
+
+  if (sourcePath.length === 0) {
+    return {
+      section: fallbackDeck?.section ?? '',
+      chapter: fallbackDeck?.chapter ?? '',
+      name: fallbackDeck?.name ?? 'Anki 导入',
+      description: fallbackDeck?.description ?? '从 Anki 导入的卡片。',
+    }
+  }
+
+  if (sourcePath.length === 1) {
+    return {
+      section: 'Anki 导入',
+      chapter: '',
+      name: sourcePath[0],
+      description: `从 Anki 原卡组 ${sourcePath[0]} 导入。`,
+    }
+  }
+
+  const majorIndex = findAnkiMajorPathIndex(sourcePath)
+  if (majorIndex >= 0) {
+    const name = sourcePath[majorIndex]
+    const section = sourcePath[0] && sourcePath[0] !== name ? sourcePath[0] : 'Anki 导入'
+    return {
+      section,
+      chapter: '',
+      name,
+      description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入，按大科目 ${name} 归组。`,
+    }
+  }
+
+  const name = sourcePath[sourcePath.length - 1]
+  const section = sourcePath[0]
+  const chapter = sourcePath.length > 2 ? sourcePath.slice(1, -1).join(' / ') : ''
+
+  return {
+    section,
+    chapter,
+    name,
+    description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入。`,
+  }
+}
+
+function summarizeAnkiDeckTargets(deckSummaries = [], fallbackDeck = null) {
+  const targetMap = new Map()
+  for (const summary of deckSummaries) {
+    const target = getAnkiDeckTarget({ source: { deckName: summary.deckName, deckPath: summary.deckPath } }, fallbackDeck)
+    const key = getDeckIdentityKey(target)
+    const current = targetMap.get(key) ?? { ...target, count: 0, sourceCount: 0, samples: [] }
+    current.count += Number(summary.count) || 0
+    current.sourceCount += 1
+    if (current.samples.length < 3) current.samples.push(summary.deckPath?.join(' / ') || summary.deckName)
+    targetMap.set(key, current)
+  }
+  return Array.from(targetMap.values()).sort((a, b) => getDeckOptionLabel(a).localeCompare(getDeckOptionLabel(b), 'zh-CN'))
+}
+
+function getDeckIdentityKey(deck) {
+  return [deck?.section ?? '', deck?.chapter ?? '', deck?.name ?? '']
+    .map((part) => normalizePathPart(part).toLowerCase())
+    .join('|||')
+}
+
+export { getDeckSection, getDeckChapter, getStableDeckColor, getDeckPath, getDeckOptionLabel, normalizePathPart, splitAnkiDeckPath, isAnkiMajorPathPart, findAnkiMajorPathIndex, getAnkiDeckTarget, summarizeAnkiDeckTargets, getDeckIdentityKey }
