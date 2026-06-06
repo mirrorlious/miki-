@@ -69,7 +69,7 @@ const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对
 const ACTIVITY_TICK_SECONDS = 10
 const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
-const BROWSE_CARD_RENDER_LIMIT = 96
+const BROWSE_CARD_RENDER_LIMIT = 48
 const BUILTIN_DYL_PACK_ID = 'dyl-exam'
 const BUILTIN_DYL_DATA_URL = '/bundles/dyl-exam/data.json'
 const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
@@ -654,9 +654,11 @@ function sanitizeCardHtml(html) {
     .replace(/<\/?(?:template|html|body)[^>]*>/gi, '')
   const safeHtml = DOMPurify.sanitize(normalizedHtml, {
     ADD_TAGS: ['audio', 'video', 'source'],
-    ADD_ATTR: ['alt', 'class', 'colspan', 'controls', 'height', 'href', 'rel', 'rowspan', 'src', 'style', 'target', 'title', 'width'],
+    ADD_ATTR: ['alt', 'class', 'colspan', 'controls', 'decoding', 'height', 'href', 'loading', 'rel', 'rowspan', 'src', 'style', 'target', 'title', 'width'],
   })
   return makeHtmlTextSelectable(safeHtml)
+    .replace(/<img\b(?![^>]*\bloading=)/gi, '<img loading="lazy"')
+    .replace(/<img\b(?![^>]*\bdecoding=)/gi, '<img decoding="async"')
 }
 
 function isScriptCallText(value = '') {
@@ -688,8 +690,7 @@ function CardContent({ card, side, className = '', fallbackClassName = '', place
     const safeHtml = side === 'front'
       ? stripAnswerSectionFromHtml(sanitizeCardHtml(html))
       : sanitizeCardHtml(html)
-    const hasRenderableHtml = safeHtml.trim()
-      && (htmlToPlainText(safeHtml) || /<(?:img|audio|video|table|ul|ol|ruby|math|svg)\b/i.test(safeHtml))
+    const hasRenderableHtml = Boolean(safeHtml.trim())
     const scopeId = sanitizeCssScopeId(`${card?.id ?? 'preview'}-${side}`)
     const scopedCss = scopeAnkiCss(card?.cardCss, `[data-anki-card="${scopeId}"]`)
 
@@ -2947,6 +2948,8 @@ function BrowseWorktable({
   const [flagColorFilter, setFlagColorFilter] = useState('all')
   const [expandedScopeKeys, setExpandedScopeKeys] = useState(() => new Set(['all']))
   const [contextMenu, setContextMenu] = useState(null)
+  const [previewCardId, setPreviewCardId] = useState(null)
+  const [previewPending, setPreviewPending] = useState(false)
   const initializedScopeRef = useRef(false)
 
   const scopeTree = useMemo(() => buildBrowseScopeTree(data), [data])
@@ -2955,10 +2958,11 @@ function BrowseWorktable({
   const browseDeckById = useMemo(() => new Map(data.decks.map((deck) => [deck.id, deck])), [data.decks])
   const browseCardById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const selectedScope = scopeNodeMap.get(selectedScopeKey) ?? scopeTree
-  const selectedScopeCardIds = useMemo(() => new Set(selectedScope.cardIds), [selectedScope])
   const selectedScopeCards = useMemo(() => (
-    data.cards.filter((card) => selectedScope.key === 'all' || selectedScopeCardIds.has(card.id))
-  ), [data.cards, selectedScope.key, selectedScopeCardIds])
+    selectedScope.key === 'all'
+      ? data.cards
+      : selectedScope.cardIds.map((id) => browseCardById.get(id)).filter(Boolean)
+  ), [browseCardById, data.cards, selectedScope.cardIds, selectedScope.key])
   const scopeDeckIds = useMemo(() => Array.from(new Set([
     ...selectedScope.deckIds,
     ...selectedScopeCards.map((card) => card.deckId),
@@ -2998,7 +3002,12 @@ function BrowseWorktable({
       })
   ), [browseDeckById, cardFilter, flagColorFilter, normalizedQuery, selectedScopeCards])
   const visibleCardRows = useMemo(() => visibleCards.slice(0, BROWSE_CARD_RENDER_LIMIT), [visibleCards])
-  const selectedCard = visibleCards.find((card) => card.id === selectedCardId) ?? visibleCards[0] ?? null
+  const visibleCardIdSet = useMemo(() => new Set(visibleCards.map((card) => card.id)), [visibleCards])
+  const selectedCard = selectedCardId && visibleCardIdSet.has(selectedCardId)
+    ? browseCardById.get(selectedCardId)
+    : visibleCards[0] ?? null
+  const previewCard = previewCardId ? browseCardById.get(previewCardId) : selectedCard
+  const previewReady = Boolean(selectedCard && previewCard && previewCard.id === selectedCard.id && !previewPending)
   const selectedScopeDeckId = selectedCard?.deckId ?? scopeDeckIds[0] ?? selectedDeckId ?? data.decks[0]?.id ?? ''
   const contextCard = contextMenu?.type === 'card' ? browseCardById.get(contextMenu.cardId) : null
   const contextScope = contextMenu?.type === 'scope' ? scopeNodeMap.get(contextMenu.scopeKey) : null
@@ -3011,10 +3020,32 @@ function BrowseWorktable({
 
   useEffect(() => {
     setSelectedCardId((current) => {
-      if (visibleCards.some((card) => card.id === current)) return current
+      if (visibleCardIdSet.has(current)) return current
       return visibleCards[0]?.id ?? null
     })
-  }, [visibleCards])
+  }, [visibleCardIdSet, visibleCards])
+
+  useEffect(() => {
+    if (!selectedCard?.id) {
+      setPreviewCardId(null)
+      setPreviewPending(false)
+      return undefined
+    }
+
+    if (previewCardId === selectedCard.id && !previewPending) return undefined
+
+    setPreviewPending(true)
+    const applyPreview = () => {
+      setPreviewCardId(selectedCard.id)
+      setPreviewPending(false)
+    }
+    if ('requestIdleCallback' in window) {
+      const idleId = window.requestIdleCallback(applyPreview, { timeout: 180 })
+      return () => window.cancelIdleCallback?.(idleId)
+    }
+    const timer = window.setTimeout(applyPreview, 80)
+    return () => window.clearTimeout(timer)
+  }, [previewCardId, previewPending, selectedCard?.id])
 
   useEffect(() => {
     if (selectedCard?.deckId) setSelectedDeckId(selectedCard.deckId)
@@ -3033,9 +3064,14 @@ function BrowseWorktable({
   }, [])
 
   function selectScope(node) {
-    setSelectedScopeKey(node.key)
-    const firstCard = data.cards.find((card) => node.key === 'all' || node.cardIds.includes(card.id))
-    setSelectedDeckId(firstCard?.deckId ?? node.deckIds[0] ?? data.decks[0]?.id ?? '')
+    const firstCard = node.key === 'all'
+      ? data.cards[0]
+      : browseCardById.get(node.cardIds[0])
+    startTransition(() => {
+      setSelectedScopeKey(node.key)
+      setSelectedCardId(firstCard?.id ?? null)
+      setSelectedDeckId(firstCard?.deckId ?? node.deckIds[0] ?? data.decks[0]?.id ?? '')
+    })
   }
 
   function toggleScopeExpanded(key) {
@@ -3366,19 +3402,27 @@ function BrowseWorktable({
                   {renderFlagControl(selectedCard, 'lg')}
                 </div>
               </div>
-              <CardContent
-                card={selectedCard}
-                side="front"
-                className="text-sm font-bold leading-relaxed text-gray-950 break-words"
-                fallbackClassName="text-sm font-bold leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
-              />
-              <div className="my-4 h-px bg-gray-200" />
-              <CardContent
-                card={selectedCard}
-                side="back"
-                className="text-sm leading-relaxed text-gray-700 break-words"
-                fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
-              />
+              {previewReady ? (
+                <>
+                  <CardContent
+                    card={previewCard}
+                    side="front"
+                    className="text-sm font-bold leading-relaxed text-gray-950 break-words"
+                    fallbackClassName="text-sm font-bold leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
+                  />
+                  <div className="my-4 h-px bg-gray-200" />
+                  <CardContent
+                    card={previewCard}
+                    side="back"
+                    className="text-sm leading-relaxed text-gray-700 break-words"
+                    fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
+                  />
+                </>
+              ) : (
+                <div className="grid min-h-[360px] place-items-center rounded-xl bg-gray-50 text-xs font-bold text-gray-400">
+                  正在准备预览...
+                </div>
+              )}
             </div>
           ) : (
             <p className="py-10 text-center text-sm text-gray-400">选择一张卡片查看预览。</p>
