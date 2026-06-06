@@ -3,7 +3,7 @@ import { BookOpen, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { stats } from '../data.js'
 
 function isNewCard(card) { return !(card?.review?.reps > 0) }
-function isCardDue(card) { if (!card?.review?.dueDate) return false; const dueTime = card.review.dueAt ? new Date(card.review.dueAt).getTime() : new Date(card.review.dueDate + 'T00:00:00').getTime(); return Number.isFinite(dueTime) && dueTime <= Date.now() }
+function isCardDue(card) { if (!card?.review?.dueDate) return false; var d = card.review.dueAt ? new Date(card.review.dueAt).getTime() : new Date(card.review.dueDate + 'T00:00:00').getTime(); return Number.isFinite(d) && d <= Date.now() }
 
 function Dashboard({ data, onOpenCreateDeck, studyDeckId, cloud }) {
   const navigate = useNavigate()
