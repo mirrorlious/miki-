@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { stripAnswerSectionFromHtml, stripAnswerSectionFromText, makeHtmlTextSelectable, stripSelectionBlockingStylesFromCss } from '../ankiHtml.js'
+import { SYSTEM_CARD_TEMPLATES } from './cardTemplates.js'
 
 function getCardSideHtml(card, side) {
   return side === 'front' ? card?.frontHtml : card?.backHtml
@@ -69,4 +70,49 @@ function isScriptCallText(value = '') {
 }
 
 
-export { getCardSideHtml, getCardSideText, looksLikeHtml, sanitizeCssScopeId, scopeAnkiCss, sanitizeCardHtml, isScriptCallText }
+function escapeHtmlText(value = '') {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function makeTemplateFieldHtml(value = '') {
+  const text = String(value ?? '')
+  if (!text) return ''
+  return looksLikeHtml(text) ? text : escapeHtmlText(text).replace(/\n/g, '<br>')
+}
+
+function applyCardTemplateCode(code = '', fields = {}) {
+  const fieldHtml = {
+    Front: makeTemplateFieldHtml(fields.front),
+    Back: makeTemplateFieldHtml(fields.back),
+  }
+  return String(code || '')
+    .replace(/{{\s*(?:Front|问题|正面)\s*}}/gi, fieldHtml.Front)
+    .replace(/{{\s*(?:Back|答案|背面)\s*}}/gi, fieldHtml.Back)
+}
+
+function buildCardValueFromTemplate(form, template) {
+  const selectedTemplate = template ?? SYSTEM_CARD_TEMPLATES[0]
+  const isHtmlTemplate = selectedTemplate.mode === 'html'
+  const front = String(form.front ?? '').trim()
+  const back = String(form.back ?? '').trim()
+  const frontHtml = isHtmlTemplate ? applyCardTemplateCode(selectedTemplate.frontCode || '{{Front}}', { front, back }) : ''
+  const backHtml = isHtmlTemplate ? applyCardTemplateCode(selectedTemplate.backCode || '{{Back}}', { front, back }) : ''
+  const frontText = isHtmlTemplate ? htmlToPlainText(frontHtml) || htmlToPlainText(front) || 'HTML 正面' : front
+  const backText = isHtmlTemplate ? htmlToPlainText(backHtml) || htmlToPlainText(back) || back : back
+
+  return {
+    front: frontText,
+    back: backText,
+    template: selectedTemplate.id,
+    ...(frontHtml ? { frontHtml } : {}),
+    ...(backHtml ? { backHtml } : {}),
+    ...(isHtmlTemplate && selectedTemplate.css ? { cardCss: selectedTemplate.css } : {}),
+  }
+}
+
+export { getCardSideHtml, getCardSideText, looksLikeHtml, htmlToPlainText, escapeHtmlText, makeTemplateFieldHtml, applyCardTemplateCode, buildCardValueFromTemplate, sanitizeCssScopeId, scopeAnkiCss, sanitizeCardHtml, isScriptCallText }
