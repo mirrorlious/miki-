@@ -1,5 +1,8 @@
-import { getDeckScopeParts } from './deckUtils.js'
+import { UNGROUPED_SECTION, BUILTIN_DYL_PACK_ID } from './constants.js'
+import { normalizePathPart, getDeckSection, getDeckChapter, getDeckScopeParts } from './deckUtils.js'
 import { getCardSideHtml, getCardSideText } from './cardHtml.js'
+import { hasStartedCard, isReviewDue, formatReviewDueLabel } from './reviewUtils.js'
+import { tokenizeForRelated } from './textUtils.js'
 
 
 function getCardAnnotations(card) {
@@ -8,6 +11,10 @@ function getCardAnnotations(card) {
 
 function getCardLinks(card) {
   return Array.isArray(card?.links) ? card.links : []
+}
+
+function getCardFlagColor(card) {
+  return card?.flagColor ?? ''
 }
 
 function getCardScopeParts(card, deckById) {
@@ -26,7 +33,21 @@ function getCardScopeParts(card, deckById) {
 }
 
 function getScopeKey(parts) {
-  return parts.length === 0 ? 'all' : `scope:${parts.join('|||')}`
+  return parts.length === 0 ? 'all' : scope:
+}
+
+function makeScopeNode(parts) {
+  return {
+    key: getScopeKey(parts),
+    label: parts[parts.length - 1] || '全部卡片',
+    pathLabel: parts.join(' / ') || '全部卡片',
+    parts,
+    depth: parts.length,
+    cardIds: new Set(),
+    deckIds: new Set(),
+    childMap: new Map(),
+    children: [],
+  }
 }
 
 function buildBrowseScopeTree(data) {
@@ -86,7 +107,7 @@ function findBestScopeNodeForDeck(scopeNodes, deckId) {
 function compactCardText(value = '', maxLength = 180) {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim()
   if (text.length <= maxLength) return text
-  return `${text.slice(0, maxLength).trim()}...`
+  return ${text.slice(0, maxLength).trim()}...
 }
 
 function getCardHtmlSections(card) {
@@ -119,13 +140,13 @@ function isBuiltinDylItem(item) {
 function getRelatedSuggestions(data, card, limit = 4) {
   if (!card) return []
   const linkedIds = new Set(getCardLinks(card))
-  const baseTokens = tokenizeForRelated(`${card.front} ${card.back}`)
+  const baseTokens = tokenizeForRelated(${card.front} )
   if (baseTokens.size === 0 && !card.source?.path?.join('/')) return []
 
   return data.cards
     .filter((item) => item.id !== card.id && !linkedIds.has(item.id))
     .map((item) => {
-      const itemTokens = tokenizeForRelated(`${item.front} ${item.back}`)
+      const itemTokens = tokenizeForRelated(${item.front} )
       let score = 0
       if (card.source?.path?.join('/') && item.source?.path?.join('/') === card.source.path.join('/')) score += 4
       let overlap = 0
@@ -142,4 +163,26 @@ function getRelatedSuggestions(data, card, limit = 4) {
     .map((item) => item.card)
 }
 
-export { getCardAnnotations, getCardLinks, getRelatedSuggestions, getCardHtmlSections, getCardScopeParts, getScopeKey, buildBrowseScopeTree, flattenScopeTree, findBestScopeNodeForDeck, isCardDue, isNewCard, getCardReviewStateLabel, hasStoredCardHtml, compactCardText, isBuiltinDylItem }
+function getAnnotationWall(data) {
+  return data.cards.flatMap((card) => getCardAnnotations(card).map((annotation) => {
+    const deck = data.decks.find((item) => item.id === card.deckId)
+    return { ...annotation, card, deck }
+  })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+}
+
+function getCardAnnotationCount(data) {
+  return data.cards.reduce((sum, card) => sum + getCardAnnotations(card).length, 0)
+}
+
+function getLinkedPairCount(data) {
+  const pairs = new Set()
+  for (const card of data.cards) {
+    for (const targetId of getCardLinks(card)) {
+      const pair = [card.id, targetId].sort().join(':')
+      pairs.add(pair)
+    }
+  }
+  return pairs.size
+}
+
+export { getCardAnnotations, getCardLinks, getCardFlagColor, getRelatedSuggestions, getCardHtmlSections, getCardScopeParts, getScopeKey, makeScopeNode, buildBrowseScopeTree, flattenScopeTree, findBestScopeNodeForDeck, isCardDue, isNewCard, getCardReviewStateLabel, hasStoredCardHtml, compactCardText, isBuiltinDylItem, getAnnotationWall, getCardAnnotationCount, getLinkedPairCount }
