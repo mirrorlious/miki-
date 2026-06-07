@@ -1,7 +1,18 @@
 import { useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { BookOpen, PencilLine, Layers3, FolderOpen, ChevronRight, Sparkles, Search } from 'lucide-react'
-import { getDeckSection, getDeckChapter } from '../lib/deckUtils.js'
+import { PROFESSIONAL_SECTIONS, UNGROUPED_SECTION } from '../lib/constants.js'
+import {
+  getDeckCards,
+  getDeckChapter,
+  getDeckOutlineRows,
+  getDeckPath,
+  getDeckSection,
+} from '../lib/deckUtils.js'
+import {
+  getAnnotationWall,
+  getCardLinks,
+} from '../lib/browseUtils.js'
 import Shell from './Shell.jsx'
 import ToolbarButton from './ToolbarButton.jsx'
 

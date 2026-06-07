@@ -455,30 +455,93 @@ export function useCloudSync(data, setData) {
   const [syncState, setSyncState] = useState(hasFirebaseConfig ? 'signed-out' : 'disabled')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
+
   const readyRef = useRef(false)
   const latestDataRef = useRef(data)
   const lastPersistedDataRef = useRef(normalizeDataShape(data))
   const timerRef = useRef(null)
   const activeUidRef = useRef(null)
+  const cloudPausedRef = useRef(false)
+  const syncingRef = useRef(false)
   const pendingDeletedRef = useRef(createPendingDeletedState())
-  const cloudPartsRef = useRef({
-    profile: null,
-    activity: null,
-    decks: [],
-    cards: [],
-    dailyLogs: [],
-    reviewLogs: [],
-  })
 
   useEffect(() => {
     latestDataRef.current = data
   }, [data])
 
+  function stopPendingWrite() {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  function markCloudError(error, fallbackMessage = '云同步失败，已暂停自动重试。') {
+    const text = mapAuthError(error)
+    cloudPausedRef.current = true
+    readyRef.current = false
+    stopPendingWrite()
+    setAuthError(text)
+    setLastErrorAt(Date.now())
+    setLastErrorMessage(text)
+    setSyncState('error')
+    setMessage(`${fallbackMessage} 本地数据仍可继续使用，可稍后手动同步重试。`)
+  }
+
+  async function readCloudOnce(uid, fns) {
+    const [profileSnap, activitySnap, ...collectionSnaps] = await Promise.all([
+      fns.getDoc(fns.doc(db, 'users', uid, 'profile', 'main')),
+      fns.getDoc(fns.doc(db, 'users', uid, 'activity', 'main')),
+      ...USER_COLLECTIONS.map((collectionName) => fns.getDocs(fns.collection(db, 'users', uid, collectionName))),
+    ])
+
+    const parts = {
+      profile: profileSnap.exists() ? normalizeFirestoreValue(profileSnap.data()) : null,
+      activity: activitySnap.exists() ? normalizeFirestoreValue(activitySnap.data()) : null,
+      decks: [],
+      cards: [],
+      dailyLogs: [],
+      reviewLogs: [],
+    }
+
+    USER_COLLECTIONS.forEach((collectionName, index) => {
+      parts[collectionName] = readCollectionSnapshot(collectionSnaps[index])
+    })
+
+    return parts
+  }
+
+  async function pullCloudData(uid, fns, { writeBackLocal = false } = {}) {
+    const cloudParts = applyPendingDeletedKeys(await readCloudOnce(uid, fns), pendingDeletedRef.current)
+    const cloudData = buildCloudData(cloudParts, normalizeDataShape({}))
+    const merged = mergeCloudIntoLocal(latestDataRef.current, cloudParts)
+
+    lastPersistedDataRef.current = cloudData
+    setLastReadAt(Date.now())
+    setLastSyncedAt(Date.now())
+
+    if (stableStringify(merged) !== stableStringify(latestDataRef.current)) {
+      setData(merged)
+    }
+
+    if (writeBackLocal && stableStringify(merged) !== stableStringify(cloudData)) {
+      const wrote = await persistDataDiff(uid, cloudData, merged)
+      lastPersistedDataRef.current = merged
+      if (wrote) setLastWriteAt(Date.now())
+    }
+
+    const now = Date.now()
+    setLastSyncedAt(now)
+    setSyncState('synced')
+    setMessage(`云端数据已同步：${getAccountLabel(user)}`)
+    return merged
+  }
+
   useEffect(() => {
-    if (!hasFirebaseConfig) return
+    if (!hasFirebaseConfig) return undefined
+
     let alive = true
     let stopAuth = () => {}
-    let stopCloud = () => {}
 
     ;(async () => {
       const fns = await import('firebase/firestore')
@@ -486,20 +549,15 @@ export function useCloudSync(data, setData) {
 
       stopAuth = onAuthStateChanged(auth, async (nextUser) => {
         if (!alive) return
+
         setUser(nextUser)
         setAuthError('')
+        stopPendingWrite()
         readyRef.current = false
+        cloudPausedRef.current = false
         activeUidRef.current = nextUser?.uid ?? null
         pendingDeletedRef.current = createPendingDeletedState()
-        cloudPartsRef.current = {
-          profile: null,
-          activity: null,
-          decks: [],
-          cards: [],
-          dailyLogs: [],
-          reviewLogs: [],
-        }
-        stopCloud()
+        lastPersistedDataRef.current = normalizeDataShape(latestDataRef.current)
 
         if (!nextUser) {
           setMessage('已退出云同步，当前继续使用本地数据。')
@@ -507,138 +565,57 @@ export function useCloudSync(data, setData) {
           return
         }
 
-        setMessage('正在连接云端数据...')
+        setMessage('正在读取云端数据...')
         setSyncState('connecting')
 
         try {
           await migrateLegacyPayload(nextUser.uid, nextUser, fns)
+          if (!alive || activeUidRef.current !== nextUser.uid) return
+          await pullCloudData(nextUser.uid, fns, { writeBackLocal: true })
+          if (!alive || activeUidRef.current !== nextUser.uid) return
+          readyRef.current = true
+          setMessage(`云同步已就绪：${getAccountLabel(nextUser)}`)
         } catch (error) {
-          if (!alive) return
-          const text = mapAuthError(error)
-          setAuthError(text)
-          setLastErrorAt(Date.now())
-          setLastErrorMessage(text)
-          setSyncState('error')
-          setMessage('旧数据迁移失败，请检查 Firestore 规则。')
-          return
-        }
-
-        const loaded = {
-          profile: false,
-          activity: false,
-          decks: false,
-          cards: false,
-          dailyLogs: false,
-          reviewLogs: false,
-        }
-        const unsubscribers = []
-
-        function allLoaded() {
-          return Object.values(loaded).every(Boolean)
-        }
-
-        async function applyCloudSnapshot(isInitial = false) {
-          const uid = activeUidRef.current
-          if (!alive || !uid) return
-
-          const cloudParts = applyPendingDeletedKeys(cloudPartsRef.current, pendingDeletedRef.current)
-          const cloudData = buildCloudData(cloudParts, normalizeDataShape({}))
-          const merged = mergeCloudIntoLocal(latestDataRef.current, cloudParts)
-
-          lastPersistedDataRef.current = cloudData
-          setLastReadAt(Date.now())
-          setLastSyncedAt(Date.now())
-          setSyncState('synced')
-          setMessage(`云端数据已读取：${getAccountLabel(nextUser)}`)
-
-          if (stableStringify(merged) !== stableStringify(latestDataRef.current)) {
-            setData(merged)
-          }
-
-          if (isInitial && stableStringify(merged) !== stableStringify(cloudData)) {
-            try {
-              const wrote = await persistDataDiff(uid, cloudData, merged)
-              if (wrote) {
-                lastPersistedDataRef.current = merged
-                setLastWriteAt(Date.now())
-                setLastSyncedAt(Date.now())
-                setMessage(`本地未上传的数据已补写到云端：${getAccountLabel(nextUser)}`)
-              }
-            } catch (error) {
-              const text = mapAuthError(error)
-              setAuthError(text)
-              setLastErrorAt(Date.now())
-              setLastErrorMessage(text)
-              setSyncState('error')
-              setMessage('补写本地数据失败。')
-            }
-          }
-        }
-
-        function markLoaded(name) {
-          loaded[name] = true
-          if (allLoaded() && !readyRef.current) {
-            readyRef.current = true
-            applyCloudSnapshot(true)
-          }
-        }
-
-        function handleSnapshotError(error) {
-          const text = mapAuthError(error)
-          setAuthError(text)
-          setLastErrorAt(Date.now())
-          setLastErrorMessage(text)
-          setSyncState('error')
-          setMessage('云同步连接失败，请检查 Firebase 配置或网络。')
-        }
-
-        unsubscribers.push(fns.onSnapshot(fns.doc(db, 'users', nextUser.uid, 'profile', 'main'), (snap) => {
-          cloudPartsRef.current.profile = snap.exists() ? normalizeFirestoreValue(snap.data()) : null
-          if (readyRef.current) applyCloudSnapshot()
-          markLoaded('profile')
-        }, handleSnapshotError))
-
-        unsubscribers.push(fns.onSnapshot(fns.doc(db, 'users', nextUser.uid, 'activity', 'main'), (snap) => {
-          cloudPartsRef.current.activity = snap.exists() ? normalizeFirestoreValue(snap.data()) : null
-          if (readyRef.current) applyCloudSnapshot()
-          markLoaded('activity')
-        }, handleSnapshotError))
-
-        for (const collectionName of USER_COLLECTIONS) {
-          unsubscribers.push(fns.onSnapshot(fns.collection(db, 'users', nextUser.uid, collectionName), (snap) => {
-            cloudPartsRef.current[collectionName] = readCollectionSnapshot(snap)
-            if (readyRef.current) applyCloudSnapshot()
-            markLoaded(collectionName)
-          }, handleSnapshotError))
-        }
-
-        stopCloud = () => {
-          unsubscribers.forEach((unsubscribe) => unsubscribe())
+          if (!alive || activeUidRef.current !== nextUser.uid) return
+          markCloudError(error, '连接云端数据失败，已停止自动重试。')
         }
       })
     })()
 
     return () => {
       alive = false
-      stopCloud()
+      stopPendingWrite()
       stopAuth()
     }
   }, [setData])
 
   useEffect(() => {
-    if (!hasFirebaseConfig || !user || !readyRef.current) return
+    if (!hasFirebaseConfig || !user || !readyRef.current || cloudPausedRef.current || syncingRef.current) return
+
     const nextData = normalizeDataShape(data)
     const previousData = lastPersistedDataRef.current
     if (stableStringify(nextData) === stableStringify(previousData)) return
+
     rememberPendingDeletedKeys(pendingDeletedRef.current, previousData, nextData)
-    if (timerRef.current) clearTimeout(timerRef.current)
+    stopPendingWrite()
     setSyncState('syncing')
     setMessage('正在同步本机变动...')
 
     timerRef.current = setTimeout(async () => {
+      if (!user || cloudPausedRef.current || syncingRef.current) return
+      syncingRef.current = true
       try {
-        const wrote = await persistDataDiff(user.uid, previousData, nextData)
-        lastPersistedDataRef.current = nextData
+        const latestData = normalizeDataShape(latestDataRef.current)
+        const previous = lastPersistedDataRef.current
+        if (stableStringify(latestData) === stableStringify(previous)) {
+          setSyncState('synced')
+          syncingRef.current = false
+          return
+        }
+
+        rememberPendingDeletedKeys(pendingDeletedRef.current, previous, latestData)
+        const wrote = await persistDataDiff(user.uid, previous, latestData)
+        lastPersistedDataRef.current = latestData
         const now = Date.now()
         if (wrote) {
           setLastWriteAt(now)
@@ -650,16 +627,13 @@ export function useCloudSync(data, setData) {
         }
         setSyncState('synced')
       } catch (error) {
-        const text = mapAuthError(error)
-        setAuthError(text)
-        setLastErrorAt(Date.now())
-        setLastErrorMessage(text)
-        setSyncState('error')
-        setMessage('这次同步没有成功。')
+        markCloudError(error, '这次同步没有成功，已暂停自动重试。')
+      } finally {
+        syncingRef.current = false
       }
-    }, 500)
+    }, 1500)
 
-    return () => timerRef.current && clearTimeout(timerRef.current)
+    return () => stopPendingWrite()
   }, [data, user])
 
   async function runAuthAction(action, pendingMessage) {
@@ -750,31 +724,29 @@ export function useCloudSync(data, setData) {
       setMessage('请先登录账号再同步。')
       return false
     }
+    if (syncingRef.current) return false
 
+    cloudPausedRef.current = false
+    readyRef.current = false
+    syncingRef.current = true
+    stopPendingWrite()
     setAuthError('')
     setSyncState('syncing')
     setMessage('正在手动同步云端数据...')
 
     try {
-      const previousData = lastPersistedDataRef.current
-      const nextData = normalizeDataShape(latestDataRef.current)
-      rememberPendingDeletedKeys(pendingDeletedRef.current, previousData, nextData)
-      const wrote = await persistDataDiff(user.uid, previousData, nextData)
-      lastPersistedDataRef.current = nextData
-      const now = Date.now()
-      setLastWriteAt(wrote ? now : lastWriteAt)
-      setLastSyncedAt(now)
+      const fns = await import('firebase/firestore')
+      await migrateLegacyPayload(user.uid, user, fns)
+      await pullCloudData(user.uid, fns, { writeBackLocal: true })
+      readyRef.current = true
       setSyncState('synced')
-      setMessage(wrote ? `手动同步完成：${getAccountLabel(user)}` : `云端数据已是最新：${getAccountLabel(user)}`)
+      setMessage(`手动同步完成：${getAccountLabel(user)}`)
       return true
     } catch (error) {
-      const text = mapAuthError(error)
-      setAuthError(text)
-      setLastErrorAt(Date.now())
-      setLastErrorMessage(text)
-      setSyncState('error')
-      setMessage('手动同步失败，请稍后再试。')
+      markCloudError(error, '手动同步失败。')
       return false
+    } finally {
+      syncingRef.current = false
     }
   }
 
@@ -801,3 +773,4 @@ export function useCloudSync(data, setData) {
     onSignOut: signOutNow,
   }
 }
+

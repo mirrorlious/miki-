@@ -219,4 +219,4 @@ function addFocusSession(current, deckId) {
   }
 }
 
-export { toLocalDateKey, getDailyLogs, getReviewLogs, getDailyLog, getActivity, getTodaySiteSeconds, formatDuration, getMonthCalendarDays, getCalendarActivityMap, getDateStudyDetails, getTodayFocusCount, getFocusSummary, addActivitySeconds, getActiveStudyDays, getTopChapterTimeRows, addFocusSession }
+export { ACTIVITY_TICK_SECONDS, ACTIVITY_IDLE_TIMEOUT_MS, toLocalDateKey, getDailyLogs, getReviewLogs, getDailyLog, getActivity, getTodaySiteSeconds, formatDuration, getMonthCalendarDays, getCalendarActivityMap, getDateStudyDetails, getTodayFocusCount, getFocusSummary, addActivitySeconds, getActiveStudyDays, getTopChapterTimeRows, addFocusSession }

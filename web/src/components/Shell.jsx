@@ -1,6 +1,6 @@
 import { useState, useContext } from 'react'
 import { Link } from 'react-router-dom'
-import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User } from 'lucide-react'
+import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch } from 'lucide-react'
 import { stats, STORAGE_KEY } from '../data.js'
 import { ThemeContext } from '../lib/theme.js'
 import { getProfile } from '../lib/profile.js'
@@ -68,6 +68,7 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
   const navItems = [
     { to: '/decks', icon: LayoutDashboard, label: '卡组' },
     { to: '/browse', icon: AlignLeft, label: '浏览', disabled: !firstDeckId },
+    { to: '/map', icon: GitBranch, label: '图谱', disabled: !firstDeckId },
     { to: '/organize', icon: FolderOpen, label: '整理', disabled: !firstDeckId },
     { to: '/app', icon: Target, label: '统计' },
     { to: '/profile', icon: User, label: '个人' },
@@ -174,7 +175,7 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
         </nav>
       </header>
 
-      <main className={`mx-auto ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} px-5 py-6`}>
+      <main data-shell-width={shellWidth} className={`shell-main mx-auto ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} px-5 py-6`}>
         {children}
       </main>
     </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { X } from 'lucide-react'
 
 const DECK_COLOR_OPTIONS = [
   { value: 'sun', label: '暖黄', cardClass: 'bg-yellow-50/80 border-yellow-100/50', pillClass: 'bg-yellow-100 text-yellow-700' },

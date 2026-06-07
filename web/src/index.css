@@ -120,6 +120,45 @@
     color: rgb(22 101 52);
   }
 
+
+  .browse-preview-card [data-anki-card].anki-card-content {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden;
+  }
+
+  .browse-preview-card [data-anki-card].anki-card-content,
+  .browse-preview-card [data-anki-card].anki-card-content * {
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+  }
+
+  .browse-preview-card [data-anki-card].anki-card-content p,
+  .browse-preview-card [data-anki-card].anki-card-content div,
+  .browse-preview-card [data-anki-card].anki-card-content span,
+  .browse-preview-card [data-anki-card].anki-card-content li {
+    max-width: 100% !important;
+  }
+
+  .browse-preview-card [data-anki-card].anki-card-content pre,
+  .browse-preview-card [data-anki-card].anki-card-content code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .browse-preview-card [data-anki-card].anki-card-content table {
+    display: block;
+    width: max-content;
+    max-width: 100% !important;
+    overflow-x: auto;
+  }
+
+  .browse-preview-card [data-anki-card].anki-card-content img,
+  .browse-preview-card [data-anki-card].anki-card-content video,
+  .browse-preview-card [data-anki-card].anki-card-content iframe {
+    max-width: 100% !important;
+  }
+
   .brand-logo {
     @apply flex h-8 w-12 items-center justify-center rounded-lg bg-[#416fae] text-white shadow-sm;
     font-family: "Segoe Print", "Comic Sans MS", "Bradley Hand ITC", cursive;
@@ -263,4 +302,34 @@ html.dark .anki-card-content th {
 }
 ::-webkit-scrollbar-thumb {
   @apply bg-gray-200 rounded-full hover:bg-gray-300 transition-colors;
+}
+
+/* Shell width toggle helpers */
+.shell-main[data-shell-width="full"] .shell-stretch {
+  max-width: none;
+}
+
+@media (min-width: 1280px) {
+  .shell-main[data-shell-width="full"] .browse-worktable-grid {
+    grid-template-columns: 300px minmax(620px, 1fr) 400px;
+  }
+}
+
+@layer components {
+  .browse-preview-section [data-anki-card].anki-card-content {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden;
+  }
+
+  .browse-preview-section [data-anki-card].anki-card-content,
+  .browse-preview-section [data-anki-card].anki-card-content * {
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+  }
+
+  .browse-preview-plain {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
 }

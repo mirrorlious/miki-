@@ -1,289 +1,190 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { BookOpen, Plus, CalendarDays, Search, Sparkles, PencilLine, GitCommit, ChevronRight } from 'lucide-react'
-import { todayKey, stats } from '../data.js'
-import { getDailyLog } from '../lib/activity.js'
-import { parseDailyReview } from '../lib/dailyReview.js'
-import { getDeckSection, getDeckChapter } from '../lib/deckUtils.js'
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FolderOpen, Layers3, Mic2, Plus, Search, Sparkles, Upload, Wand2, Wrench, X } from 'lucide-react'
+import { todayKey } from '../data.js'
+import { compactCardText, isCardDue, isNewCard } from '../lib/browseUtils.js'
+import { getDeckPath, getDeckSection, getSectionNames, sortDecksByPath } from '../lib/deckUtils.js'
 import Shell from './Shell.jsx'
-import ToolbarButton from './ToolbarButton.jsx'
-import LearningOverviewPanel from './LearningOverviewPanel.jsx'
-import AchievementSummaryPanel from './AchievementSummaryPanel.jsx'
-import DailyReviewPanel from './DailyReviewPanel.jsx'
-import CollapseToggle from './CollapseToggle.jsx'
 
-function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteSection, onSaveDailyLog, onCreateDailyCards, studyDeckId, cloud }) {
-  const navigate = useNavigate()
-  const [selectedDeckId, setSelectedDeckId] = useState(data.decks[0]?.id ?? null)
-  const [selectedSection, setSelectedSection] = useState('全部')
-  const [collapsedPanels, setCollapsedPanels] = useState({
-    daily: true,
-    sections: false,
-    deckList: false,
-    currentDeck: false,
-  })
+const CARD_MAKER_URL = 'https://anki-card-maker-xi.vercel.app/'
 
-  function toggleDeckPanel(panel) {
-    setCollapsedPanels((current) => ({ ...current, [panel]: !current[panel] }))
-  }
+function isWeakCard(card) {
+  const grade = Number(card?.review?.lastGrade)
+  return Boolean(card?.flagged || card?.flagColor || Number(card?.review?.lapses ?? 0) > 0 || grade === 0 || grade === 1)
+}
 
-  function isPanelExpanded(panel) {
-    return !collapsedPanels[panel]
-  }
+function toLocalDateKey(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
-  const deckRows = useMemo(() => sortDecksByPath(data.decks).map((deck) => {
-    const cards = data.cards.filter((card) => card.deckId === deck.id)
-    return {
-      ...deck,
-      total: cards.length,
-      due: cards.filter(isCardDue).length,
-      newCount: cards.filter(isNewCard).length,
-    }
-  }), [data.cards, data.decks])
-
-  const sectionRows = useMemo(() => getSectionNames(data.decks)
-    .map((section) => {
-      const sectionDecks = deckRows.filter((deck) => getDeckSection(deck) === section)
-      return {
-        section,
-        total: sectionDecks.reduce((sum, deck) => sum + deck.total, 0),
-        due: sectionDecks.reduce((sum, deck) => sum + deck.due, 0),
-        deckCount: sectionDecks.length,
-      }
-    }), [data.decks, deckRows])
-
-  const visibleDeckRows = useMemo(() => (
-    selectedSection === '全部'
-      ? deckRows
-      : deckRows.filter((deck) => getDeckSection(deck) === selectedSection)
-  ), [deckRows, selectedSection])
-
-  useEffect(() => {
-    if (selectedSection !== '全部' && !sectionRows.some((section) => section.section === selectedSection)) {
-      setSelectedSection('全部')
-    }
-  }, [sectionRows, selectedSection])
-
-  useEffect(() => {
-    if (!visibleDeckRows.some((deck) => deck.id === selectedDeckId)) {
-      setSelectedDeckId(visibleDeckRows[0]?.id ?? null)
-    }
-  }, [selectedDeckId, visibleDeckRows])
-
-  const selectedDeck = visibleDeckRows.find((deck) => deck.id === selectedDeckId) ?? deckRows.find((deck) => deck.id === selectedDeckId)
-  const deckCards = data.cards.filter((card) => card.deckId === selectedDeck?.id)
-  const emptyDeckListText = selectedSection === '全部'
-    ? '还没有卡组。'
-    : `${selectedSection} 还没有卡组，可以先开一个章节或专题。`
-  const selectedSectionSummary = useMemo(() => {
-    if (selectedSection === '全部') return { deckCount: 0, cardCount: 0 }
-    const sectionDecks = deckRows.filter((deck) => getDeckSection(deck) === selectedSection)
-    return {
-      deckCount: sectionDecks.length,
-      cardCount: sectionDecks.reduce((sum, deck) => sum + deck.total, 0),
-    }
-  }, [deckRows, selectedSection])
-
-  function handleDelete(deck) {
-    const count = data.cards.filter((card) => card.deckId === deck.id).length
-    const confirmed = window.confirm(`确定删除卡组“${deck.name}”吗？该卡组下的 ${count} 张卡片也会一起删除。`)
-    if (!confirmed) return
-    onDeleteDeck(deck.id)
-  }
-
-  function handleDeleteSelectedSection() {
-    if (selectedSection === '全部' || selectedSectionSummary.deckCount === 0) return
-    const confirmed = window.confirm(`确定删除板块“${selectedSection}”吗？该板块下的 ${selectedSectionSummary.deckCount} 个卡组和 ${selectedSectionSummary.cardCount} 张卡片会一起删除。`)
-    if (!confirmed) return
-    onDeleteSection(selectedSection)
-    setSelectedSection('全部')
-  }
-
-  function openCreateDeckForCurrentSection() {
-    const section = selectedSection !== '全部' && selectedSection !== UNGROUPED_SECTION ? selectedSection : ''
-    onOpenCreateDeck(section ? { section } : null)
-  }
-
+function MetricTile({ icon: Icon, label, value, hint, tone }) {
   return (
-    <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
-      <header className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-gray-950">卡组</h1>
-          <p className="text-xs text-gray-500 mt-1">按法硕科目、章节和专题组织复习材料。</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => selectedDeckId && navigate(`/cards/new/${selectedDeckId}`)} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300" disabled={!selectedDeckId}>添加</button>
-          <button onClick={() => navigate('/import')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 disabled:text-gray-300" disabled={!selectedDeckId}>导入</button>
-          <button onClick={() => selectedDeckId && navigate(`/study/${selectedDeckId}`)} className="h-10 px-4 rounded-xl bg-[#007aff] text-white text-sm font-bold shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={!selectedDeckId}>学习</button>
-        </div>
-      </header>
-
-      <LearningOverviewPanel data={data} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_340px] gap-5 items-start">
-        <aside className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-          <div className="h-10 px-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-sm font-black text-gray-950">学习板块</h2>
-            <div className="flex items-center gap-1">
-              <BookOpen size={15} className="text-gray-300" />
-              <CollapseToggle expanded={isPanelExpanded('sections')} onToggle={() => toggleDeckPanel('sections')} label="学习板块" />
-            </div>
-          </div>
-          {isPanelExpanded('sections') && <div className="p-2 flex flex-col gap-1">
-            <button
-              type="button"
-              onClick={() => setSelectedSection('全部')}
-              className={`text-left px-3 py-2 rounded text-sm flex items-center justify-between gap-3 ${selectedSection === '全部' ? 'bg-green-50 text-green-700 font-bold' : 'text-gray-700 hover:bg-gray-50'}`}
-            >
-              <span>全部</span>
-              <span className="text-xs text-gray-400">{data.cards.length}</span>
-            </button>
-            {sectionRows.map((section) => {
-              const isEmpty = section.deckCount === 0
-              const isSelected = selectedSection === section.section
-              return (
-                <button
-                  key={section.section}
-                  type="button"
-                  onClick={() => setSelectedSection(section.section)}
-                  className={`text-left px-3 py-2 rounded text-sm ${isSelected ? 'bg-green-50 text-green-700 font-bold' : isEmpty ? 'text-gray-400 hover:bg-gray-50 hover:text-gray-600' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
-                  <span className="flex items-center justify-between gap-3">
-                    <span className="line-clamp-1">{section.section}</span>
-                    <span className="text-xs text-gray-400">{section.total}</span>
-                  </span>
-                  <span className="mt-1 block text-[11px] text-gray-400">{isEmpty ? '待开架' : `${section.deckCount} 组 · 到期 ${section.due}`}</span>
-                </button>
-              )
-            })}
-          </div>}
-        </aside>
-
-        <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-          <div className="h-10 px-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-sm font-black text-gray-950">{selectedSection === '全部' ? '牌组列表' : `${selectedSection}牌组`}</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-gray-400">{visibleDeckRows.length} 个</span>
-              {selectedSection !== '全部' && visibleDeckRows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleDeleteSelectedSection}
-                  className="inline-flex h-7 items-center gap-1 rounded-lg bg-red-50 px-2 text-[11px] font-black text-red-600 hover:bg-red-100"
-                  title={`删除 ${selectedSection} 板块`}
-                >
-                  <Trash2 size={12} />
-                  删除板块
-                </button>
-              )}
-              <CollapseToggle expanded={isPanelExpanded('deckList')} onToggle={() => toggleDeckPanel('deckList')} label="牌组列表" />
-            </div>
-          </div>
-          {isPanelExpanded('deckList') && (visibleDeckRows.length === 0 ? (
-            <div className="p-10 text-center">
-              <p className="text-sm text-gray-400 mb-4">{emptyDeckListText}</p>
-              <button onClick={openCreateDeckForCurrentSection} className="h-10 px-4 rounded-xl bg-[#007aff] text-white text-sm font-bold hover:bg-[#006ee6]">新建卡组</button>
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500">
-                <tr>
-                  <th className="text-left px-4 py-2 font-bold">牌组</th>
-                  <th className="text-right px-3 py-2 font-bold">新卡</th>
-                  <th className="text-right px-3 py-2 font-bold">到期</th>
-                  <th className="text-right px-3 py-2 font-bold">总数</th>
-                  <th className="text-right px-4 py-2 font-bold">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleDeckRows.map((deck) => (
-                  <tr key={deck.id} className={`border-t border-gray-100 hover:bg-gray-50 ${selectedDeckId === deck.id ? 'bg-green-50/60' : ''}`}>
-                    <td className="px-4 py-3">
-                      <button type="button" onClick={() => setSelectedDeckId(deck.id)} className="text-left">
-                        <strong className="block text-sm text-gray-950">{deck.name}</strong>
-                        <span className="mt-1 inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">
-                          <FolderOpen size={11} /> {getDeckPath(deck)}
-                        </span>
-                        <span className="block text-xs text-gray-500 line-clamp-1 mt-1">{deck.description}</span>
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-right text-blue-600 font-bold">{deck.newCount}</td>
-                    <td className="px-3 py-3 text-right text-red-600 font-bold">{deck.due}</td>
-                    <td className="px-3 py-3 text-right text-gray-700 font-bold">{deck.total}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1.5">
-                        <button onClick={() => navigate(`/study/${deck.id}`)} className="h-7 px-2 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50">学习</button>
-                        <button onClick={() => navigate(`/cards/new/${deck.id}`)} className="h-7 px-2 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50">添加</button>
-                        <button onClick={() => navigate('/browse', { state: { deckId: deck.id } })} className="h-7 px-2 rounded-lg bg-white text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50">浏览</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ))}
-        </section>
-
-        <aside className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-          <div className="h-10 px-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-sm font-black text-gray-950">当前牌组</h2>
-            <div className="flex items-center gap-2">
-              {selectedDeck && <span className="text-xs font-bold text-gray-400">{deckCards.length} 张</span>}
-              <CollapseToggle expanded={isPanelExpanded('currentDeck')} onToggle={() => toggleDeckPanel('currentDeck')} label="当前牌组" />
-            </div>
-          </div>
-          {isPanelExpanded('currentDeck') && <>
-          <div className="p-4">
-            <div>
-              {selectedDeck && (
-                <span className="mb-2 inline-flex items-center gap-1 rounded bg-green-50 px-2 py-1 text-[11px] font-black text-green-700">
-                  <FolderOpen size={12} /> {getDeckPath(selectedDeck)}
-                </span>
-              )}
-              <h3 className="font-black text-gray-950 mb-2">{selectedDeck?.name ?? '卡片列表'}</h3>
-              <p className="text-sm text-gray-500 leading-relaxed">{selectedDeck?.description ?? '先选择一个卡组。'}</p>
-            </div>
-            {selectedDeck && (
-              <div className="grid grid-cols-2 gap-2 mt-4">
-                <button onClick={() => navigate(`/study/${selectedDeck.id}`)} className="h-9 rounded-xl bg-[#007aff] text-white text-xs font-bold hover:bg-[#006ee6]">开始学习</button>
-                <button onClick={() => navigate(`/cards/new/${selectedDeck.id}`)} className="h-9 rounded-xl bg-gray-100 text-xs font-bold text-gray-700 hover:bg-gray-200">添加卡片</button>
-                <button onClick={() => onOpenEditDeck(selectedDeck)} className="h-9 rounded-xl bg-gray-100 text-xs font-bold text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1.5">
-                  <PencilLine size={14} /> 编辑
-                </button>
-                <button onClick={() => handleDelete(selectedDeck)} className="h-9 rounded-xl bg-red-50 text-red-700 text-xs font-bold hover:bg-red-100 flex items-center justify-center gap-1.5">
-                  <Trash2 size={14} /> 删除
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="border-t border-gray-100 max-h-[360px] overflow-y-auto">
-            {deckCards.length === 0 && <p className="text-sm text-gray-400 p-4">当前卡组为空。</p>}
-            {deckCards.slice(0, 8).map((card) => (
-              <div key={card.id} className="px-4 py-3 border-b border-gray-100">
-                <strong className="block text-sm text-gray-900 line-clamp-1 mb-1">{card.front}</strong>
-                <p className="text-[11px] text-gray-500 line-clamp-1">{card.back}</p>
-              </div>
-            ))}
-          </div>
-          </>}
-        </aside>
-      </div>
-
-      <div className="mt-5">
-        <DailyReviewPanel
-          data={data}
-          selectedDeckId={selectedDeckId}
-          onSelectDeck={setSelectedDeckId}
-          onSaveDailyLog={onSaveDailyLog}
-          onCreateDailyCards={onCreateDailyCards}
-          collapsed={collapsedPanels.daily}
-          onToggle={() => toggleDeckPanel('daily')}
-        />
-      </div>
-
-      <AchievementSummaryPanel data={data} />
-    </Shell>
+    <div className="rounded-2xl border border-white bg-white/70 p-4 shadow-sm">
+      <div className={`mb-3 grid h-11 w-11 place-items-center rounded-2xl ${tone}`}><Icon size={20} /></div>
+      <p className="text-xs font-black text-gray-400">{label}</p>
+      <p className="mt-1 text-3xl font-black text-gray-950">{value}</p>
+      <p className="mt-1 text-xs font-bold text-gray-400">{hint}</p>
+    </div>
   )
 }
 
+function Decks({ data, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, studyDeckId, cloud }) {
+  const navigate = useNavigate()
+  const [toolboxOpen, setToolboxOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [selectedSection, setSelectedSection] = useState('全部')
+  const today = todayKey()
+  const cards = Array.isArray(data?.cards) ? data.cards : []
+  const decks = Array.isArray(data?.decks) ? data.decks : []
+  const reviewLogs = Array.isArray(data?.reviewLogs) ? data.reviewLogs : []
+
+  const dueCards = useMemo(() => cards.filter(isCardDue), [cards])
+  const weakCards = useMemo(() => cards.filter(isWeakCard), [cards])
+  const newCards = useMemo(() => cards.filter(isNewCard), [cards])
+  const reviewedToday = useMemo(() => reviewLogs.filter((log) => toLocalDateKey(log.reviewedAt) === today), [reviewLogs, today])
+  const clearRate = dueCards.length + reviewedToday.length > 0 ? Math.round((reviewedToday.length / (dueCards.length + reviewedToday.length)) * 100) : 0
+  const estimatedMinutes = Math.max(3, Math.ceil(dueCards.length * 1.4 + Math.min(weakCards.length, 20) * 0.9 + Math.min(newCards.length, 10) * 0.8))
+
+  const deckRows = useMemo(() => sortDecksByPath(decks).map((deck) => {
+    const deckCards = cards.filter((card) => card.deckId === deck.id)
+    const due = deckCards.filter(isCardDue).length
+    const weak = deckCards.filter(isWeakCard).length
+    const fresh = deckCards.filter(isNewCard).length
+    return {
+      ...deck,
+      total: deckCards.length,
+      due,
+      weak,
+      newCount: fresh,
+      pressure: due * 3 + weak * 2 + fresh,
+    }
+  }).filter((deck) => deck.total > 0), [cards, decks])
+
+  const sections = useMemo(() => ['全部', ...getSectionNames(decks)], [decks])
+  const visibleDeckRows = selectedSection === '全部' ? deckRows : deckRows.filter((deck) => getDeckSection(deck) === selectedSection)
+  const recommendationRows = [...deckRows].sort((a, b) => b.pressure - a.pressure).slice(0, 5)
+  const firstStudyDeckId = dueCards[0]?.deckId || weakCards[0]?.deckId || newCards[0]?.deckId || studyDeckId || decks[0]?.id
+
+  return (
+    <Shell data={data} cloud={cloud} studyDeckId={studyDeckId} wide>
+      <header className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="mb-1 text-xs font-black uppercase tracking-[0.22em] text-blue-600">today desk</p>
+          <h1 className="text-2xl font-black text-gray-950">今日学习台</h1>
+          <p className="mt-1 text-sm text-gray-500">首页只回答一件事：现在该学什么。</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setToolboxOpen(true)} className="h-10 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50"><Wrench size={15} className="mr-1 inline" />工具箱</button>
+          <button onClick={() => navigate('/import')} className="h-10 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">导入</button>
+          <button onClick={() => firstStudyDeckId && navigate(`/study/${firstStudyDeckId}`)} disabled={!firstStudyDeckId} className="h-10 rounded-xl bg-[#007aff] px-5 text-sm font-black text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300">开始今日学习</button>
+        </div>
+      </header>
+
+      <section className="mb-5 overflow-hidden rounded-[28px] border border-white bg-white/90 shadow-sm">
+        <div className="grid gap-0 lg:grid-cols-[1.05fr_1.1fr]">
+          <div className="border-b border-gray-100 p-6 lg:border-b-0 lg:border-r">
+            <div className="flex items-start justify-between gap-5">
+              <div>
+                <h2 className="text-2xl font-black text-gray-950">今天先处理这三件事</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-gray-500">预计 {estimatedMinutes} 分钟：先清到期，再回收薄弱，最后少量推进新卡。</p>
+              </div>
+              <div className="shrink-0 rounded-2xl bg-gray-950 px-5 py-4 text-center text-white">
+                <p className="text-xs font-black text-gray-300">清空率</p>
+                <p className="text-3xl font-black">{clearRate}%</p>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <MetricTile icon={BookOpen} label="待复习" value={dueCards.length} hint="今天必须处理" tone="bg-red-50 text-red-500" />
+              <MetricTile icon={AlertTriangle} label="仍模糊" value={weakCards.length} hint="优先回收" tone="bg-orange-50 text-orange-500" />
+              <MetricTile icon={CheckCircle2} label="已完成" value={reviewedToday.length} hint="今日完成" tone="bg-green-50 text-green-600" />
+              <MetricTile icon={Layers3} label="新卡池" value={newCards.length} hint="量力追加" tone="bg-blue-50 text-blue-600" />
+            </div>
+          </div>
+
+          <div className="p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-black text-gray-950">今日推荐 5 个任务</h2>
+              <button onClick={() => navigate('/map')} className="text-xs font-black text-blue-600 hover:text-blue-700">用知识拼图筛卡</button>
+            </div>
+            <div className="space-y-3">
+              {recommendationRows.map((deck, index) => (
+                <button key={deck.id} onClick={() => navigate(`/study/${deck.id}`)} className="group flex w-full items-center gap-3 rounded-2xl bg-gray-50 px-4 py-3 text-left transition hover:bg-blue-50">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gray-950 text-sm font-black text-white">{index + 1}</span>
+                  <span className="min-w-0 flex-1">
+                    <strong className="block truncate text-sm font-black text-gray-950">{deck.name}</strong>
+                    <span className="mt-1 block truncate text-xs font-bold text-gray-400">{getDeckPath(deck)}</span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs font-black text-gray-400"><b className="text-orange-500">薄弱 {deck.weak}</b><br />新卡 {deck.newCount}</span>
+                  <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500" />
+                </button>
+              ))}
+              {recommendationRows.length === 0 && <p className="rounded-2xl bg-gray-50 py-12 text-center text-sm font-bold text-gray-400">暂无学习任务</p>}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white bg-white/90 shadow-sm">
+        <button type="button" onClick={() => setLibraryOpen((value) => !value)} className="flex h-14 w-full items-center justify-between px-5 text-left">
+          <span><strong className="block text-sm font-black text-gray-950">我的资料库</strong><span className="text-xs font-bold text-gray-400">{cards.length} 张卡 · {decks.length} 个卡组，默认折叠，避免首页变后台。</span></span>
+          <ChevronDown size={16} className={`text-gray-400 transition ${libraryOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {libraryOpen && (
+          <div className="border-t border-gray-100 p-4">
+            <div className="mb-4 flex flex-wrap gap-2">
+              {sections.map((section) => (
+                <button key={section} onClick={() => setSelectedSection(section)} className={`rounded-full px-3 py-1.5 text-xs font-black ${selectedSection === section ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{section}</button>
+              ))}
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+              {visibleDeckRows.slice(0, 18).map((deck) => (
+                <article key={deck.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-base font-black text-gray-950">{deck.name}</h3>
+                      <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{deck.description || getDeckPath(deck)}</p>
+                    </div>
+                    <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-600">{deck.total}</span>
+                  </div>
+                  <div className="mb-3 flex gap-2 text-xs font-black"><span className="text-blue-600">新 {deck.newCount}</span><span className="text-red-600">到期 {deck.due}</span><span className="text-orange-600">薄弱 {deck.weak}</span></div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => navigate(`/study/${deck.id}`)} className="h-8 rounded-lg bg-blue-50 text-xs font-black text-blue-600">学习</button>
+                    <button onClick={() => navigate(`/cards/new/${deck.id}`)} className="h-8 rounded-lg bg-gray-100 text-xs font-black text-gray-600">添加</button>
+                    <button onClick={() => navigate('/browse', { state: { deckId: deck.id } })} className="h-8 rounded-lg bg-gray-100 text-xs font-black text-gray-600">浏览</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            {visibleDeckRows.length > 18 && <p className="pt-4 text-center text-xs font-bold text-gray-400">已显示前 18 个卡组，可在浏览页查看全部。</p>}
+          </div>
+        )}
+      </section>
+
+      {toolboxOpen && (
+        <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setToolboxOpen(false)}>
+          <aside className="ml-auto h-full w-full max-w-md bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-5 flex items-center justify-between">
+              <div><h2 className="text-xl font-black text-gray-950">制卡工具箱</h2><p className="text-xs font-bold text-gray-400">收起来，首页就清爽。</p></div>
+              <button onClick={() => setToolboxOpen(false)} className="grid h-9 w-9 place-items-center rounded-full bg-gray-100 text-gray-500"><X size={16} /></button>
+            </div>
+            <div className="grid gap-3">
+              <button onClick={() => { setToolboxOpen(false); navigate(`/cards/new/${studyDeckId || decks[0]?.id || ''}`) }} className="flex items-center gap-3 rounded-2xl bg-blue-50 p-4 text-left text-blue-700"><Plus /><span><strong className="block">单张制卡</strong><em className="not-italic text-xs font-bold">手动添加一张卡片</em></span></button>
+              <button onClick={() => { setToolboxOpen(false); navigate('/import') }} className="flex items-center gap-3 rounded-2xl bg-green-50 p-4 text-left text-green-700"><Upload /><span><strong className="block">批量制卡 / 导入</strong><em className="not-italic text-xs font-bold">文本、Markdown、APKG</em></span></button>
+              <a href={CARD_MAKER_URL} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-2xl bg-purple-50 p-4 text-left text-purple-700"><Wand2 /><span><strong className="block">AI 制卡器</strong><em className="not-italic text-xs font-bold">外部工具，生成后导入</em></span><ExternalLink size={15} className="ml-auto" /></a>
+              <button onClick={() => alert('语音转文字入口已预留，下一版可接 Web Speech API 或外部转写。')} className="flex items-center gap-3 rounded-2xl bg-orange-50 p-4 text-left text-orange-700"><Mic2 /><span><strong className="block">语音转文字</strong><em className="not-italic text-xs font-bold">先预留入口</em></span></button>
+              <button onClick={() => { setToolboxOpen(false); navigate('/map') }} className="flex items-center gap-3 rounded-2xl bg-gray-100 p-4 text-left text-gray-700"><Search /><span><strong className="block">知识拼图</strong><em className="not-italic text-xs font-bold">组合专题筛卡</em></span></button>
+            </div>
+          </aside>
+        </div>
+      )}
+    </Shell>
+  )
+}
 
 export default Decks

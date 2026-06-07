@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BookOpen, CalendarDays, Plus, PencilLine, Layers3, Search, Sparkles } from 'lucide-react'
 import { todayKey, stats } from '../data.js'
 import { getDailyLog } from '../lib/activity.js'
 import { parseDailyReview } from '../lib/dailyReview.js'
+import { formatStudyDate } from '../lib/dateUtils.js'
 import CollapseToggle from './CollapseToggle.jsx'
+import DeckSelectOptions from './DeckSelectOptions.jsx'
 
 function DailyReviewPanel({ data, selectedDeckId, onSelectDeck, onSaveDailyLog, onCreateDailyCards, collapsed = false, onToggle }) {
   const dateKey = todayKey()

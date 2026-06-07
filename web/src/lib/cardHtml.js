@@ -105,13 +105,16 @@ function buildCardValueFromTemplate(form, template) {
   const frontText = isHtmlTemplate ? htmlToPlainText(frontHtml) || htmlToPlainText(front) || 'HTML 正面' : front
   const backText = isHtmlTemplate ? htmlToPlainText(backHtml) || htmlToPlainText(back) || back : back
 
+  const isBuiltInSystemTemplate = SYSTEM_CARD_TEMPLATES.some((item) => item.id === selectedTemplate.id)
+
   return {
     front: frontText,
     back: backText,
     template: selectedTemplate.id,
     ...(frontHtml ? { frontHtml } : {}),
     ...(backHtml ? { backHtml } : {}),
-    ...(isHtmlTemplate && selectedTemplate.css ? { cardCss: selectedTemplate.css } : {}),
+    ...(isHtmlTemplate && selectedTemplate.css && !isBuiltInSystemTemplate ? { cardCss: selectedTemplate.css } : {}),
+    ...(isHtmlTemplate && selectedTemplate.js && !isBuiltInSystemTemplate ? { cardJs: selectedTemplate.js } : {}),
   }
 }
 

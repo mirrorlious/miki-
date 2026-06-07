@@ -1,27 +1,11 @@
-import { useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react'
-import { Link, NavLink, useNavigate, useLocation, useParams } from 'react-router-dom'
-import { AlignLeft, BookOpen, Brain, ChevronRight, Flag, FolderOpen, Gift, Layers3, List, ListOrdered, Maximize2, MoreVertical, Plus, Search, Star, Trash2, Wand2, X, ArrowUp, ArrowDown, Check, GripHorizontal, MessageSquare, PencilLine, User, Volume2 } from 'lucide-react'
-import { motion } from 'framer-motion'
-import DOMPurify from 'dompurify'
-import { getDeckOptionLabel, getDeckScopeParts } from '../lib/deckUtils.js'
-import { sanitizeCardHtml, scopeAnkiCss, sanitizeCssScopeId } from '../lib/cardHtml.js'
-import { getCardAnnotations, getCardLinks, getRelatedSuggestions, getCardHtmlSections, getCardScopeParts, getScopeKey, buildBrowseScopeTree, flattenScopeTree, findBestScopeNodeForDeck, isCardDue, isNewCard, getCardReviewStateLabel, hasStoredCardHtml, compactCardText, isBuiltinDylItem } from '../lib/browseUtils.js'
-import { makeHtmlTextSelectable, stripAnswerSectionFromHtml, stripAnswerSectionFromText, stripSelectionBlockingStylesFromCss } from '../ankiHtml.js'
-import Shell from './Shell.jsx'
-import ToolbarButton from './ToolbarButton.jsx'
-import CardContent from './CardContent.jsx'
-import PixelItemIcon from './PixelItemIcon.jsx'
-
-const BROWSE_CARD_RENDER_LIMIT = 48
-const FLAG_COLOR_OPTIONS = [
 import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import ToolbarButton from './components/ToolbarButton.jsx'
-import PixelItemIcon from './components/PixelItemIcon.jsx'
-import CollapseToggle from './components/CollapseToggle.jsx'
-import CardContent from './components/CardContent.jsx'
-import AuthDialog from './components/AuthDialog.jsx'
-import Shell from './components/Shell.jsx'
+import ToolbarButton from './ToolbarButton.jsx'
+import PixelItemIcon from './PixelItemIcon.jsx'
+import CollapseToggle from './CollapseToggle.jsx'
+import CardContent from './CardContent.jsx'
+import AuthDialog from './AuthDialog.jsx'
+import Shell from './Shell.jsx'
 import { motion } from 'framer-motion'
 import DOMPurify from 'dompurify'
 import {
@@ -66,17 +50,35 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
-import { parseApkgFile } from './apkgImport'
+import { parseApkgFile } from '../apkgImport'
 import {
   makeHtmlTextSelectable,
   stripAnswerSectionFromHtml,
   stripAnswerSectionFromText,
   stripSelectionBlockingStylesFromCss,
-} from './ankiHtml'
-import { parseBulkCards, parseMarkdownCards } from './cardImport'
-import { loadData, scheduleReview, stats, STORAGE_KEY, todayKey } from './data'
-import { useCloudSync } from './useCloudSync'
-import ErrorBoundary from './components/ErrorBoundary'
+} from '../ankiHtml'
+import { parseBulkCards, parseMarkdownCards } from '../cardImport'
+import { getDeckChapter, getDeckOptionLabel, getDeckPath, getDeckSection, normalizePathPart } from '../lib/deckUtils.js'
+import {
+  buildBrowseScopeTree,
+  compactCardText,
+  findBestScopeNodeForDeck,
+  flattenScopeTree,
+  getCardAnnotations,
+  getCardHtmlSections,
+  getCardLinks,
+  getCardReviewStateLabel,
+  getCardScopeParts,
+  getRelatedSuggestions,
+  getScopeKey,
+  hasStoredCardHtml,
+  isBuiltinDylItem,
+  isCardDue,
+  isNewCard,
+} from '../lib/browseUtils.js'
+import { loadData, scheduleReview, stats, STORAGE_KEY, todayKey } from '../data'
+import { useCloudSync } from '../useCloudSync'
+import ErrorBoundary from './ErrorBoundary'
 
 const DECK_COLOR_OPTIONS = [
   { value: 'sun', label: '暖黄', cardClass: 'bg-yellow-50/80 border-yellow-100/50', pillClass: 'bg-yellow-100 text-yellow-700' },
@@ -85,19 +87,694 @@ const DECK_COLOR_OPTIONS = [
   { value: 'mint', label: '薄荷', cardClass: 'bg-emerald-50/80 border-emerald-100/50', pillClass: 'bg-emerald-100 text-emerald-700' },
 ]
 
+const DEFAULT_DECK_SECTIONS = ['法理', '宪法', '民法', '刑法', '法制史', '政治', '英语', '规律专题']
+const UNGROUPED_SECTION = '未分组'
+const PROFESSIONAL_SECTIONS = ['法理', '宪法', '民法', '刑法', '法制史']
+const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对比']
+const ACTIVITY_TICK_SECONDS = 10
+const ACTIVITY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+const CHAPTER_MILESTONE_SECONDS = 10 * 60
+const BROWSE_CARD_RENDER_LIMIT = 12
+const BROWSE_CARD_COLUMNS_STORAGE_KEY = `${STORAGE_KEY}:browse-card-columns`
+const BROWSE_PREVIEW_MODE_STORAGE_KEY = `${STORAGE_KEY}:browse-preview-mode`
+const BROWSE_CARD_COLUMN_OPTIONS = [1, 2, 3, 4]
+const BROWSE_PREVIEW_MODE_OPTIONS = [
+  { value: 'auto', label: '智能' },
+  { value: 'html', label: 'HTML' },
+  { value: 'text', label: '文本' },
+]
+const BROWSE_CARD_GRID_CLASSES = {
+  1: 'grid-cols-1',
+  2: 'grid-cols-1 xl:grid-cols-2',
+  3: 'grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3',
+  4: 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4',
+}
+const BUILTIN_DYL_PACK_ID = 'dyl-exam'
+const BUILTIN_DYL_DATA_URL = '/bundles/dyl-exam/data.json'
+const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
+const STUDY_GRADE_OPTIONS = [
+  {
+    grade: 0,
+    label: 'Again',
+    title: '重来',
+    detail: '仍然不稳',
+    result: '今天再巩固',
+    className: 'bg-red-50 text-red-700 hover:bg-red-100 border-red-100',
+    badgeClass: 'bg-red-100 text-red-700',
+  },
+  {
+    grade: 1,
+    label: 'Hard',
+    title: '困难',
+    detail: '有点卡住',
+    result: '短间隔复习',
+    className: 'bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-100',
+    badgeClass: 'bg-orange-100 text-orange-700',
+  },
+  {
+    grade: 2,
+    label: 'Good',
+    title: '记住',
+    detail: '基本熟了',
+    result: '按计划延后',
+    className: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-100',
+    badgeClass: 'bg-emerald-100 text-emerald-700',
+  },
+  {
+    grade: 3,
+    label: 'Easy',
+    title: '轻松',
+    detail: '很稳',
+    result: '更久后再见',
+    className: 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-100',
+    badgeClass: 'bg-blue-100 text-blue-700',
+  },
+]
 
 
-import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.onload = () => resolve(image)
+    image.onerror = reject
+    image.src = dataUrl
+  })
+}
+
+async function compressImageFile(file, { maxSize = 900, quality = 0.78 } = {}) {
+  if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件。')
+  const dataUrl = await readFileAsDataUrl(file)
+  if (file.type === 'image/svg+xml' || file.type === 'image/gif') return dataUrl
+
+  const image = await loadImageFromDataUrl(dataUrl)
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
+  const width = Math.max(1, Math.round(image.width * scale))
+  const height = Math.max(1, Math.round(image.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  context.drawImage(image, 0, 0, width, height)
+  return canvas.toDataURL('image/jpeg', quality)
+}
 
 
-import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 
-import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+function getDeckChapterKey(deck) {
+  return `${getDeckSection(deck)}|||${getDeckChapter(deck)}`
+}
+
+function getDeckChapterLabel(deck) {
+  const chapter = getDeckChapter(deck)
+  return chapter ? getDeckPath(deck) : `${getDeckSection(deck)} / 未细分`
+}
 
 
-import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
+
+
+
+
+
+
+function getStableDeckColor(value = '') {
+  const colors = DECK_COLOR_OPTIONS.map((option) => option.value)
+  const hash = Array.from(String(value)).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return colors[hash % colors.length] ?? 'sun'
+}
+
+function getSectionNames(decks) {
+  const customSections = decks
+    .map(getDeckSection)
+    .filter((section) => section && section !== UNGROUPED_SECTION && !DEFAULT_DECK_SECTIONS.includes(section))
+  return [
+    ...DEFAULT_DECK_SECTIONS,
+    ...Array.from(new Set(customSections)),
+    UNGROUPED_SECTION,
+  ]
+}
+
+function sortDecksByPath(decks) {
+  return [...decks].sort((a, b) => getDeckOptionLabel(a).localeCompare(getDeckOptionLabel(b), 'zh-CN'))
+}
+
+function groupDecksBySection(decks) {
+  return getSectionNames(decks)
+    .map((section) => ({
+      section,
+      decks: sortDecksByPath(decks.filter((deck) => getDeckSection(deck) === section)),
+    }))
+    .filter((group) => group.decks.length > 0)
+}
+
+function DeckSelectOptions({ decks }) {
+  return groupDecksBySection(decks).map((group) => (
+    <optgroup key={group.section} label={group.section}>
+      {group.decks.map((deck) => (
+        <option key={deck.id} value={deck.id}>{getDeckOptionLabel(deck)}</option>
+      ))}
+    </optgroup>
+  ))
+}
+
+function getDeckCards(data, deckId) {
+  return data.cards.filter((card) => card.deckId === deckId)
+}
+
+
+
+const FLAG_COLOR_OPTIONS = [
+  { value: 'red', label: '红旗', menuLabel: '红色' },
+  { value: 'orange', label: '橙旗', menuLabel: '橙色' },
+  { value: 'green', label: '绿旗', menuLabel: '绿色' },
+  { value: 'blue', label: '蓝旗', menuLabel: '蓝色' },
+  { value: 'purple', label: '紫旗', menuLabel: '紫色' },
+]
+
+function getCardFlagColor(card) {
+  if (card?.flagColor) return card.flagColor
+  return card?.flagged ? 'red' : ''
+}
+
+function isCardFlagged(card) {
+  return Boolean(card?.flagged || getCardFlagColor(card))
+}
+
+function getFlagColorClass(color, active = true) {
+  if (!active) return 'text-gray-300 hover:bg-gray-100 hover:text-red-500'
+  if (color === 'orange') return 'bg-orange-50 text-orange-500'
+  if (color === 'green') return 'bg-green-50 text-green-600'
+  if (color === 'blue') return 'bg-blue-50 text-blue-600'
+  if (color === 'purple') return 'bg-purple-50 text-purple-600'
+  return 'bg-red-50 text-red-500'
+}
+
+function getFlagColorTextClass(color) {
+  if (color === 'orange') return 'text-orange-500'
+  if (color === 'green') return 'text-green-600'
+  if (color === 'blue') return 'text-blue-600'
+  if (color === 'purple') return 'text-purple-600'
+  return 'text-red-500'
+}
+
+
+function getDeckScopeParts(deck) {
+  return [
+    getDeckSection(deck),
+    ...getDeckChapter(deck).split('/').map(normalizePathPart).filter(Boolean),
+    deck?.name,
+  ].filter(Boolean)
+}
+
+
+function makeScopeNode(parts) {
+  return {
+    key: getScopeKey(parts),
+    label: parts[parts.length - 1] || '全部卡片',
+    pathLabel: parts.join(' / ') || '全部卡片',
+    parts,
+    depth: parts.length,
+    cardIds: new Set(),
+    deckIds: new Set(),
+    childMap: new Map(),
+    children: [],
+  }
+}
+
+
+
+
+
+
+
+
+function escapeHtmlText(value = '') {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function makeTemplateFieldHtml(value = '') {
+  const text = String(value ?? '')
+  if (!text) return ''
+  return looksLikeHtml(text) ? text : escapeHtmlText(text).replace(/\n/g, '<br>')
+}
+
+function applyCardTemplateCode(code = '', fields = {}) {
+  const fieldHtml = {
+    Front: makeTemplateFieldHtml(fields.front),
+    Back: makeTemplateFieldHtml(fields.back),
+  }
+  return String(code || '')
+    .replace(/{{\s*(?:Front|问题|正面)\s*}}/gi, fieldHtml.Front)
+    .replace(/{{\s*(?:Back|答案|背面)\s*}}/gi, fieldHtml.Back)
+}
+
+function buildCardValueFromTemplate(form, template) {
+  const selectedTemplate = template ?? SYSTEM_CARD_TEMPLATES[0]
+  const isHtmlTemplate = selectedTemplate.mode === 'html'
+  const front = String(form.front ?? '').trim()
+  const back = String(form.back ?? '').trim()
+  const frontHtml = isHtmlTemplate ? applyCardTemplateCode(selectedTemplate.frontCode || '{{Front}}', { front, back }) : ''
+  const backHtml = isHtmlTemplate ? applyCardTemplateCode(selectedTemplate.backCode || '{{Back}}', { front, back }) : ''
+  const frontText = isHtmlTemplate ? htmlToPlainText(frontHtml) || htmlToPlainText(front) || 'HTML 正面' : front
+  const backText = isHtmlTemplate ? htmlToPlainText(backHtml) || htmlToPlainText(back) || back : back
+
+  return {
+    front: frontText,
+    back: backText,
+    template: selectedTemplate.id,
+    ...(frontHtml ? { frontHtml } : {}),
+    ...(backHtml ? { backHtml } : {}),
+    ...(isHtmlTemplate && selectedTemplate.css ? { cardCss: selectedTemplate.css } : {}),
+  }
+}
+
+
+function getReviewReps(review) {
+  const reps = Number(review?.reps ?? 0)
+  return Number.isFinite(reps) ? reps : 0
+}
+
+function getCardReviewReps(card) {
+  return getReviewReps(card?.review)
+}
+
+function makeNewCardReview(review = {}) {
+  const { dueAt, ...rest } = review ?? {}
+  return {
+    ...rest,
+    dueDate: '',
+    interval: Number(rest.interval ?? 0) || 0,
+    ease: Number(rest.ease ?? 2.5) || 2.5,
+    reps: 0,
+    lapses: Number(rest.lapses ?? 0) || 0,
+    lastGrade: rest.lastGrade ?? null,
+  }
+}
+
+function hasStartedCard(card) {
+  return getCardReviewReps(card) > 0
+}
+
+
+function normalizeImportedAnkiCards(data) {
+  let changed = false
+  const cards = data.cards.map((card) => {
+    const patch = {}
+    const reps = getCardReviewReps(card)
+
+    if (reps === 0 && (card.review?.dueDate || card.review?.dueAt || card.review?.reps !== 0)) {
+      patch.review = makeNewCardReview(card.review)
+    }
+
+    if (card?.source?.type === 'apkg') {
+      const nextFront = stripAnswerSectionFromText(card.front)
+      const nextFrontHtml = card.frontHtml ? stripAnswerSectionFromHtml(card.frontHtml) : card.frontHtml
+
+      if (nextFront && nextFront !== card.front) patch.front = nextFront
+      if (nextFrontHtml && nextFrontHtml !== card.frontHtml) patch.frontHtml = nextFrontHtml
+    }
+
+    if (Object.keys(patch).length === 0) return card
+    changed = true
+    return { ...card, ...patch }
+  })
+
+  return changed ? { ...data, cards } : data
+}
+
+function getReviewDueTime(review) {
+  if (review?.dueAt) {
+    const dueAt = new Date(review.dueAt).getTime()
+    if (Number.isFinite(dueAt)) return dueAt
+  }
+  if (review?.dueDate) {
+    const dueDate = new Date(`${review.dueDate}T00:00:00`).getTime()
+    if (Number.isFinite(dueDate)) return dueDate
+  }
+  return 0
+}
+
+function isReviewDue(review) {
+  const dueTime = getReviewDueTime(review)
+  return getReviewReps(review) > 0 && dueTime > 0 && dueTime <= Date.now()
+}
+
+
+
+
+function stripBuiltinDylItems(data) {
+  return {
+    ...data,
+    decks: data.decks.filter((deck) => !isBuiltinDylItem(deck)),
+    cards: data.cards.filter((card) => !isBuiltinDylItem(card)),
+  }
+}
+
+function makeBuiltinCardOverride(baseCard, patch = {}) {
+  return {
+    id: baseCard.id,
+    deckId: baseCard.deckId,
+    builtinPack: BUILTIN_DYL_PACK_ID,
+    createdAt: baseCard.createdAt,
+    review: baseCard.review ?? { dueDate: '', interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
+    favorite: Boolean(baseCard.favorite),
+    flagged: Boolean(baseCard.flagged),
+    flagColor: getCardFlagColor(baseCard),
+    comment: baseCard.comment ?? '',
+    annotations: getCardAnnotations(baseCard),
+    links: getCardLinks(baseCard),
+    ...patch,
+    updatedAt: Date.now(),
+  }
+}
+
+function mergeBuiltinDylData(data, bundle, signedIn) {
+  const cleanData = stripBuiltinDylItems(data)
+  if (!signedIn || !bundle?.loaded) return cleanData
+
+  const overrides = new Map(data.cards.filter(isBuiltinDylItem).map((card) => [card.id, card]))
+  const mergedCards = bundle.cards.map((baseCard) => {
+    const override = overrides.get(baseCard.id)
+    if (!override) return baseCard
+    return {
+      ...baseCard,
+      review: override.review ?? baseCard.review,
+      favorite: Boolean(override.favorite),
+      flagged: Boolean(override.flagged),
+      flagColor: getCardFlagColor(override),
+      comment: override.comment ?? '',
+      annotations: getCardAnnotations(override),
+      links: getCardLinks(override),
+      updatedAt: override.updatedAt,
+    }
+  })
+
+  return {
+    ...cleanData,
+    decks: [...bundle.decks, ...cleanData.decks],
+    cards: [...mergedCards, ...cleanData.cards],
+  }
+}
+
+function formatReviewDueLabel(review) {
+  const dueAt = getReviewDueTime(review)
+  if (!dueAt) return '现在'
+  const diffMs = dueAt - Date.now()
+  if (diffMs <= 0) return '现在'
+  const minutes = Math.max(1, Math.round(diffMs / 60000))
+  if (minutes < 60) return `${minutes}分钟后`
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)}小时后`
+  const days = Math.ceil(minutes / (24 * 60))
+  return `${days}天后`
+}
+
+function makeLocalCacheData(data) {
+  return {
+    ...data,
+    cards: Array.isArray(data.cards)
+      ? data.cards.map((card) => {
+        const lightCard = { ...card }
+        delete lightCard.frontHtml
+        delete lightCard.backHtml
+        delete lightCard.cardCss
+        delete lightCard.htmlSections
+        return lightCard
+      })
+      : [],
+  }
+}
+
+function persistDataToLocalCache(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (error) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(makeLocalCacheData(data)))
+      console.warn('Local cache was too large, saved a lightweight copy without Anki HTML/CSS.', error)
+    } catch (fallbackError) {
+      console.warn('Local cache write skipped because browser storage is full.', fallbackError)
+    }
+  }
+}
+
+function getInitialTheme() {
+  if (typeof window === 'undefined') return 'light'
+
+  try {
+    const savedTheme = localStorage.getItem(APP_THEME_STORAGE_KEY)
+    if (savedTheme === 'dark' || savedTheme === 'light') return savedTheme
+  } catch {
+    // Ignore storage failures and fall back to the system preference.
+  }
+
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+
+function getInitialBrowseCardColumns() {
+  if (typeof window === 'undefined') return 2
+
+  try {
+    const savedColumns = Number(localStorage.getItem(BROWSE_CARD_COLUMNS_STORAGE_KEY))
+    if (BROWSE_CARD_COLUMN_OPTIONS.includes(savedColumns)) return savedColumns
+  } catch {
+    // Ignore storage failures and use the default compact grid.
+  }
+
+  return 2
+}
+
+function getInitialBrowsePreviewMode() {
+  if (typeof window === 'undefined') return 'auto'
+
+  try {
+    const savedMode = localStorage.getItem(BROWSE_PREVIEW_MODE_STORAGE_KEY)
+    if (BROWSE_PREVIEW_MODE_OPTIONS.some((option) => option.value === savedMode)) return savedMode
+  } catch {
+    // Ignore storage failures and use the smart preview.
+  }
+
+  return 'auto'
+}
+
+function getBrowsePreviewPlainText(card, sections = []) {
+  if (!card) return ''
+  const sectionText = sections.map((section) => [section.label, section.text].filter(Boolean).join('：')).filter(Boolean).join('\n\n')
+  return [card.front, card.back, sectionText]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+
+function getDateLabel(dateKey) {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+  })
+}
+
+function tokenizeForRelated(value) {
+  const asciiTokens = String(value ?? '').toLowerCase().match(/[a-z0-9]{3,}/g) ?? []
+  const chineseTokens = String(value ?? '').match(/[\u4e00-\u9fa5]{2,}/g) ?? []
+  const slicedChinese = chineseTokens.flatMap((token) => {
+    const parts = []
+    for (let index = 0; index < token.length - 1; index += 1) parts.push(token.slice(index, index + 2))
+    return parts
+  })
+  const stopTokens = new Set(['decryptfront', 'decryptback', 'decrypt', 'front', 'back'])
+  return new Set([...asciiTokens, ...slicedChinese].filter((token) => !stopTokens.has(token)))
+}
+
+
+function getAnnotationWall(data) {
+  return data.cards.flatMap((card) => getCardAnnotations(card).map((annotation) => {
+    const deck = data.decks.find((item) => item.id === card.deckId)
+    return { ...annotation, card, deck }
+  })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+}
+
+function getDeckOutlineRows(data) {
+  return getSectionNames(data.decks)
+    .map((section) => {
+      const decks = sortDecksByPath(data.decks.filter((deck) => getDeckSection(deck) === section))
+      return {
+        section,
+        decks,
+        cardCount: decks.reduce((sum, deck) => sum + getDeckCards(data, deck.id).length, 0),
+        chapters: decks.reduce((chapters, deck) => {
+          const chapter = getDeckChapter(deck) || '未细分'
+          const current = chapters.get(chapter) ?? { chapter, decks: [], cardCount: 0 }
+          current.decks.push(deck)
+          current.cardCount += getDeckCards(data, deck.id).length
+          chapters.set(chapter, current)
+          return chapters
+        }, new Map()),
+      }
+    })
+    .filter((row) => row.decks.length > 0)
+    .map((row) => ({ ...row, chapters: Array.from(row.chapters.values()) }))
+}
+
+
+
+
+function getCardAnnotationCount(data) {
+  return data.cards.reduce((sum, card) => sum + getCardAnnotations(card).length, 0)
+}
+
+function getLinkedPairCount(data) {
+  const pairs = new Set()
+  for (const card of data.cards) {
+    for (const targetId of getCardLinks(card)) {
+      const pair = [card.id, targetId].sort().join(':')
+      pairs.add(pair)
+    }
+  }
+  return pairs.size
+}
+
+function getActiveStudyDays(data) {
+  const days = new Set()
+  for (const log of getDailyLogs(data)) {
+    if (log.date) days.add(log.date)
+  }
+  for (const log of getReviewLogs(data)) {
+    if (log.reviewedAt) days.add(toLocalDateKey(log.reviewedAt))
+  }
+  for (const card of data.cards) {
+    if (card.createdAt) days.add(toLocalDateKey(card.createdAt))
+  }
+  return Array.from(days).sort()
+}
+
+
+
+
+function formatCountdown(totalMs) {
+  const seconds = Math.max(0, Math.floor(totalMs / 1000))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const restSeconds = seconds % 60
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(restSeconds).padStart(2, '0')}`
+}
+
+function formatCountdownWithDays(totalMs) {
+  const seconds = Math.max(0, Math.floor(totalMs / 1000))
+  const days = Math.floor(seconds / 86400)
+  const rest = seconds % 86400
+  const clock = formatCountdown(rest * 1000)
+  return days > 0 ? `${days}天 ${clock}` : clock
+}
+
+function getCountdownInfo(data, now) {
+  const profile = getStoredProfile(data)
+  if (profile.examDate) {
+    const target = new Date(`${profile.examDate}T23:59:59`).getTime()
+    if (target > now) {
+      return {
+        label: '考试倒计时',
+        detail: profile.examDate,
+        value: formatCountdownWithDays(target - now),
+      }
+    }
+  }
+
+  const currentDate = new Date(now)
+  const endOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + 1)
+  return {
+    label: '今日倒计时',
+    detail: '到今晚 24:00',
+    value: formatCountdown(endOfDay.getTime() - now),
+  }
+}
+
+
+
+
+function getTopChapterTimeRows(data, limit = 4) {
+  const activity = getActivity(data)
+  const rows = new Map()
+
+  for (const [deckId, rawSeconds] of Object.entries(activity.deckSeconds)) {
+    const deck = data.decks.find((item) => item.id === deckId)
+    if (!deck) continue
+    const raw = Math.max(0, Number(rawSeconds) || 0)
+    const siteCap = activity.siteSeconds > 0 ? activity.siteSeconds : raw
+    const seconds = Math.min(raw, siteCap, 12 * 60 * 60)
+    const key = getDeckChapterKey(deck)
+    const current = rows.get(key) ?? {
+      key,
+      label: getDeckChapterLabel(deck),
+      seconds: 0,
+      deckCount: 0,
+    }
+    current.seconds += seconds
+    current.deckCount += 1
+    rows.set(key, current)
+  }
+
+  return Array.from(rows.values())
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, limit)
+}
+
+
+
+
+function addFocusSession(current, deckId) {
+  const activity = getActivity(current)
+  return {
+    ...current,
+    activity: {
+      ...activity,
+      focusSessions: activity.focusSessions + 1,
+      focusLog: [
+        { id: `focus-${Date.now()}`, deckId, startedAt: Date.now() },
+        ...activity.focusLog,
+      ].slice(0, 200),
+      updatedAt: Date.now(),
+    },
+  }
+}
+
+function formatStudyDate(dateKey) {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+  })
+}
+
+function makeDailyCardSourceKey(dateKey, card, index) {
+  return `daily:${dateKey}:${index}:${String(card.front ?? '').trim().slice(0, 30)}`
+}
+
+
+
+
+
+
+function Home() {
+  return <Navigate to="/decks" replace />
+}
 
 function BrowseWorktable({
   data,
@@ -107,6 +784,7 @@ function BrowseWorktable({
   onOpenCreateDeck,
   onOpenEditDeck,
   onDeleteDeck,
+  onDeleteCards,
 }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -122,10 +800,18 @@ function BrowseWorktable({
   const [previewCardId, setPreviewCardId] = useState(null)
   const [previewPending, setPreviewPending] = useState(false)
   const [visibleCount, setVisibleCount] = useState(BROWSE_CARD_RENDER_LIMIT)
+  const [cardColumnCount, setCardColumnCount] = useState(getInitialBrowseCardColumns)
+  const [previewMode, setPreviewMode] = useState(getInitialBrowsePreviewMode)
   const loadMoreSentinelRef = useRef(null)
   const initializedScopeRef = useRef(false)
+  const cardGridClassName = BROWSE_CARD_GRID_CLASSES[cardColumnCount] ?? BROWSE_CARD_GRID_CLASSES[2]
+  const selectedFlagOption = flagColorFilter === 'none'
+    ? { label: '无旗', menuLabel: '无旗' }
+    : flagColorFilter === 'all'
+      ? { label: '全部旗色', menuLabel: '全部旗色' }
+      : FLAG_COLOR_OPTIONS.find((option) => option.value === flagColorFilter) ?? { label: '旗色', menuLabel: '旗色' }
 
-  const scopeTree = useMemo(() => buildBrowseScopeTree(data), [data])
+  const scopeTree = useMemo(() => buildBrowseScopeTree({ decks: data.decks, cards: data.cards }), [data.decks, data.cards])
   const scopeNodes = useMemo(() => flattenScopeTree(scopeTree), [scopeTree])
   const scopeNodeMap = useMemo(() => new Map(scopeNodes.map((node) => [node.key, node])), [scopeNodes])
   const browseDeckById = useMemo(() => new Map(data.decks.map((deck) => [deck.id, deck])), [data.decks])
@@ -165,7 +851,11 @@ function BrowseWorktable({
         if (cardFilter === 'flagged') return isCardFlagged(card)
         return true
       })
-      .filter((card) => flagColorFilter === 'all' || getCardFlagColor(card) === flagColorFilter)
+      .filter((card) => {
+        if (flagColorFilter === 'all') return true
+        if (flagColorFilter === 'none') return !getCardFlagColor(card)
+        return getCardFlagColor(card) === flagColorFilter
+      })
       .filter((card) => {
         if (!normalizedQuery) return true
         const deck = browseDeckById.get(card.deckId)
@@ -178,9 +868,12 @@ function BrowseWorktable({
   const visibleCardIdSet = useMemo(() => new Set(visibleCards.map((card) => card.id)), [visibleCards])
   const selectedCard = selectedCardId && visibleCardIdSet.has(selectedCardId)
     ? browseCardById.get(selectedCardId)
-    : visibleCards[0] ?? null
+    : null
   const previewCard = previewCardId ? browseCardById.get(previewCardId) : selectedCard
   const previewReady = Boolean(selectedCard && previewCard && previewCard.id === selectedCard.id && !previewPending)
+  const previewHtmlSections = useMemo(() => getCardHtmlSections(previewCard), [previewCard])
+  const previewPlainText = useMemo(() => getBrowsePreviewPlainText(previewCard, previewHtmlSections), [previewCard, previewHtmlSections])
+  const shouldRenderPreviewSections = previewHtmlSections.length > 0 && (previewMode === 'auto' || previewMode === 'html')
   const selectedScopeDeckId = selectedCard?.deckId ?? scopeDeckIds[0] ?? selectedDeckId ?? data.decks[0]?.id ?? ''
   const contextCard = contextMenu?.type === 'card' ? browseCardById.get(contextMenu.cardId) : null
   const contextScope = contextMenu?.type === 'scope' ? scopeNodeMap.get(contextMenu.scopeKey) : null
@@ -194,7 +887,7 @@ function BrowseWorktable({
   useEffect(() => {
     setSelectedCardId((current) => {
       if (visibleCardIdSet.has(current)) return current
-      return visibleCards[0]?.id ?? null
+      return null
     })
   }, [visibleCardIdSet, visibleCards])
 
@@ -229,11 +922,27 @@ function BrowseWorktable({
   }, [visibleCards])
 
   useEffect(() => {
+    try {
+      localStorage.setItem(BROWSE_CARD_COLUMNS_STORAGE_KEY, String(cardColumnCount))
+    } catch {
+      // Ignore storage failures. The grid choice is only a display preference.
+    }
+  }, [cardColumnCount])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BROWSE_PREVIEW_MODE_STORAGE_KEY, previewMode)
+    } catch {
+      // Ignore storage failures. The preview choice is only a display preference.
+    }
+  }, [previewMode])
+
+  useEffect(() => {
     const sentinel = loadMoreSentinelRef.current
     if (!sentinel) return
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting && visibleCount < visibleCards.length) {
-        setVisibleCount((current) => Math.min(current + 24, visibleCards.length))
+        setVisibleCount((current) => Math.min(current + 12, visibleCards.length))
       }
     }, { rootMargin: "160px" })
     observer.observe(sentinel)
@@ -253,13 +962,10 @@ function BrowseWorktable({
   }, [])
 
   function selectScope(node) {
-    const firstCard = node.key === 'all'
-      ? data.cards[0]
-      : browseCardById.get(node.cardIds[0])
     startTransition(() => {
       setSelectedScopeKey(node.key)
-      setSelectedCardId(firstCard?.id ?? null)
-      setSelectedDeckId(firstCard?.deckId ?? node.deckIds[0] ?? data.decks[0]?.id ?? '')
+      setSelectedCardId(null)
+      setSelectedDeckId(node.deckIds[0] ?? data.decks[0]?.id ?? '')
     })
   }
 
@@ -313,6 +1019,21 @@ function BrowseWorktable({
 
   function toggleCardFavorite(card) {
     onUpdateCardMeta?.(card.id, { favorite: !card.favorite })
+  }
+
+  function deleteCardWithConfirm(card) {
+    if (!card?.id || !onDeleteCards) return
+    const title = compactCardText(card.front || card.back || card.id, 80)
+    const confirmed = window.confirm(`确定删除这张卡片吗？
+
+${title}
+
+删除后会同时移除它的复习记录。`)
+    if (!confirmed) return
+    onDeleteCards([card.id])
+    setSelectedCardId((current) => (current === card.id ? null : current))
+    setPreviewCardId((current) => (current === card.id ? null : current))
+    setContextMenu(null)
   }
 
   function renderFavoriteControl(card, size = 'sm') {
@@ -442,8 +1163,8 @@ function BrowseWorktable({
     top: Math.min(contextMenu.y, Math.max(8, window.innerHeight - 320)),
   } : {}
 
-  const scopeDue = selectedScopeCards.filter(isCardDue).length
-  const scopeNew = selectedScopeCards.filter(isNewCard).length
+  const scopeDue = useMemo(() => selectedScopeCards.filter(isCardDue).length, [selectedScopeCards])
+  const scopeNew = useMemo(() => selectedScopeCards.filter(isNewCard).length, [selectedScopeCards])
 
   return (
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId} wide>
@@ -457,7 +1178,7 @@ function BrowseWorktable({
         </div>
       </header>
 
-      <div className="grid min-h-[720px] grid-cols-1 justify-center gap-4 xl:grid-cols-[300px_620px_400px]">
+      <div className="browse-worktable-grid grid min-h-[720px] w-full grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(620px,1fr)_400px]">
         <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
           <div className="flex h-12 items-center justify-between border-b border-gray-200 px-4">
             <div>
@@ -507,32 +1228,83 @@ function BrowseWorktable({
                   </button>
                 ))}
                 <span className="mx-1 h-5 w-px bg-gray-200" />
-                <button
-                  type="button"
-                  onClick={() => setFlagColorFilter('all')}
-                  className={`h-7 rounded-lg px-2.5 ${flagColorFilter === 'all' ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                >
-                  全部旗色
-                </button>
-                {FLAG_COLOR_OPTIONS.map((color) => (
+                <details className="group relative inline-flex h-7 shrink-0">
+                  <summary className={`flex h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 transition-colors [&::-webkit-details-marker]:hidden ${flagColorFilter !== 'all' || cardFilter === 'flagged' ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800'}`}>
+                    <Flag size={13} fill={flagColorFilter !== 'all' && flagColorFilter !== 'none' ? 'currentColor' : 'none'} />
+                    <span>{cardFilter === 'flagged' && flagColorFilter === 'all' ? '全部旗帜' : selectedFlagOption.label}</span>
+                  </summary>
+                  <div className="absolute left-0 top-full z-50 mt-1 w-32 rounded-xl border border-gray-200 bg-white p-1.5 text-[11px] font-black text-gray-600 shadow-2xl">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.currentTarget.closest('details')?.removeAttribute('open')
+                        setFlagColorFilter('all')
+                      }}
+                      className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left ${flagColorFilter === 'all' && cardFilter !== 'flagged' ? 'bg-gray-950 text-white' : 'hover:bg-gray-50'}`}
+                    >
+                      <Flag size={13} />
+                      全部卡片
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.currentTarget.closest('details')?.removeAttribute('open')
+                        setCardFilter('flagged')
+                        setFlagColorFilter('all')
+                      }}
+                      className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left ${cardFilter === 'flagged' && flagColorFilter === 'all' ? 'bg-gray-950 text-white' : 'hover:bg-gray-50'}`}
+                    >
+                      <Flag size={13} fill="currentColor" />
+                      全部旗帜
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.currentTarget.closest('details')?.removeAttribute('open')
+                        setCardFilter('all')
+                        setFlagColorFilter('none')
+                      }}
+                      className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left ${flagColorFilter === 'none' ? 'bg-gray-950 text-white' : 'hover:bg-gray-50'}`}
+                    >
+                      <Flag size={13} />
+                      无旗
+                    </button>
+                    <div className="my-1 h-px bg-gray-100" />
+                    {FLAG_COLOR_OPTIONS.map((color) => (
+                      <button
+                        key={color.value}
+                        type="button"
+                        onClick={(event) => {
+                          event.currentTarget.closest('details')?.removeAttribute('open')
+                          setCardFilter('flagged')
+                          setFlagColorFilter(color.value)
+                        }}
+                        className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left ${flagColorFilter === color.value ? getFlagColorClass(color.value) : 'hover:bg-gray-50'}`}
+                      >
+                        <Flag size={13} fill="currentColor" className={getFlagColorTextClass(color.value)} />
+                        {color.menuLabel}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+                <span className="mx-1 hidden h-5 w-px bg-gray-200 sm:inline-block" />
+                <span className="text-[11px] font-black text-gray-400">每行</span>
+                {BROWSE_CARD_COLUMN_OPTIONS.map((count) => (
                   <button
-                    key={color.value}
+                    key={count}
                     type="button"
-                    onClick={() => {
-                      setCardFilter('flagged')
-                      setFlagColorFilter(color.value)
-                    }}
-                    className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2 ${flagColorFilter === color.value ? getFlagColorClass(color.value) : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                    onClick={() => setCardColumnCount(count)}
+                    className={`h-7 rounded-lg px-2.5 ${cardColumnCount === count ? 'bg-[#007aff] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                    title={`每行最多 ${count} 张卡片`}
                   >
-                    <Flag size={13} fill={flagColorFilter === color.value ? 'currentColor' : 'none'} />
-                    {color.label}
+                    {count}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="max-h-[calc(100vh-220px)] overflow-auto bg-gray-50/70 p-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className={`grid gap-3 ${cardGridClassName}`}>
                 {visibleCardRows.map((card) => (
                     <article
                       key={card.id}
@@ -576,8 +1348,22 @@ function BrowseWorktable({
 
         <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
           {selectedCard ? (
-            <div className="max-h-[calc(100vh-150px)] overflow-auto p-4">
-              <div className="sticky top-0 z-10 mb-2 flex justify-end gap-1 bg-white/90 pb-2 backdrop-blur">
+            <div className="browse-preview-card max-h-[calc(100vh-150px)] overflow-auto p-4">
+              <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center justify-between gap-2 bg-white/90 pb-2 backdrop-blur">
+                <div className="flex items-center gap-1 rounded-xl bg-gray-100 p-1 text-[11px] font-black text-gray-500">
+                  <span className="px-1 text-gray-400">预览</span>
+                  {BROWSE_PREVIEW_MODE_OPTIONS.map((mode) => (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => setPreviewMode(mode.value)}
+                      className={`h-6 rounded-lg px-2 transition-colors ${previewMode === mode.value ? 'bg-white text-gray-950 shadow-sm' : 'hover:bg-white/70 hover:text-gray-700'}`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => selectedScopeDeckId && navigate(`/cards/new/${selectedScopeDeckId}`)}
@@ -590,24 +1376,56 @@ function BrowseWorktable({
                 <div className="flex shrink-0 items-center gap-1">
                   {renderFavoriteControl(selectedCard, 'lg')}
                   {renderFlagControl(selectedCard, 'lg')}
+                  <button
+                    type="button"
+                    onClick={() => deleteCardWithConfirm(selectedCard)}
+                    className="grid h-8 w-8 place-items-center rounded-lg text-gray-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                    title="删除这张卡片"
+                    disabled={!onDeleteCards}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
                 </div>
               </div>
               {previewReady ? (
-                <>
-                  <CardContent
-                    card={previewCard}
-                    side="front"
-                    className="text-sm font-bold leading-relaxed text-gray-950 break-words"
-                    fallbackClassName="text-sm font-bold leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
-                  />
-                  <div className="my-4 h-px bg-gray-200" />
-                  <CardContent
-                    card={previewCard}
-                    side="back"
-                    className="text-sm leading-relaxed text-gray-700 break-words"
-                    fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
-                  />
-                </>
+                previewMode === 'text' ? (
+                  <div className="browse-preview-plain whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-sm font-bold leading-7 text-gray-800">
+                    {previewPlainText || '这张卡没有可显示内容。'}
+                  </div>
+                ) : shouldRenderPreviewSections ? (
+                  <div className="space-y-3">
+                    {previewHtmlSections.map((section) => (
+                      <section key={section.id} className="browse-preview-section rounded-xl border border-gray-100 bg-white p-3">
+                        <h3 className="mb-2 border-b border-gray-100 pb-2 text-xs font-black text-gray-400">{section.label}</h3>
+                        <CardContent
+                          card={previewCard}
+                          side="back"
+                          htmlOverride={section.html || ''}
+                          textOverride={section.text || ''}
+                          className="text-sm leading-relaxed text-gray-700 break-words"
+                          fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
+                        />
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <CardContent
+                      card={previewCard}
+                      side="front"
+                      className="text-sm font-bold leading-relaxed text-gray-950 break-words"
+                      fallbackClassName="text-sm font-bold leading-relaxed text-gray-950 break-words whitespace-pre-wrap"
+                    />
+                    <div className="my-4 h-px bg-gray-200" />
+                    <CardContent
+                      card={previewCard}
+                      side="back"
+                      className="text-sm leading-relaxed text-gray-700 break-words"
+                      fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
+                    />
+                  </>
+                )
               ) : (
                 <div className="grid min-h-[360px] place-items-center rounded-xl bg-gray-50 text-xs font-bold text-gray-400">
                   正在准备预览...
@@ -627,6 +1445,10 @@ function BrowseWorktable({
               <button type="button" onClick={() => { toggleCardFavorite(contextCard); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
                 <Star size={14} fill={contextCard.favorite ? 'currentColor' : 'none'} className={contextCard.favorite ? 'text-yellow-500' : 'text-gray-400'} />
                 {contextCard.favorite ? '取消星标' : '设为星标'}
+              </button>
+              <button type="button" onClick={() => deleteCardWithConfirm(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-red-600 hover:bg-red-50 disabled:text-gray-300" disabled={!onDeleteCards}>
+                <Trash2 size={14} />
+                删除这张卡片
               </button>
               <div className="my-1 h-px bg-gray-100" />
               <button type="button" onClick={() => { setCardFlagColor(contextCard, ''); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-gray-400 hover:bg-gray-50">
@@ -667,7 +1489,7 @@ function BrowseWorktable({
   )
 }
 
-function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck }) {
+function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteCards }) {
   const location = useLocation()
   const navigate = useNavigate()
   const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
@@ -714,7 +1536,7 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
   useEffect(() => {
     setSelectedCardId((current) => {
       if (visibleCards.some((card) => card.id === current)) return current
-      return visibleCards[0]?.id ?? null
+      return null
     })
   }, [visibleCards])
 
@@ -764,6 +1586,7 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
         onOpenCreateDeck={onOpenCreateDeck}
         onOpenEditDeck={onOpenEditDeck}
         onDeleteDeck={onDeleteDeck}
+        onDeleteCards={onDeleteCards}
       />
     )
   }

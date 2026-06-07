@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Link as LinkWithRef, useNavigate, useParams } from 'react-router-dom'
-import { BookOpen, ChevronLeft, ChevronRight, PencilLine, Plus, Star, Trash2, Video, Volume2, Image, Bold, Italic, Underline, Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, Maximize2, Search, Sparkles, GripHorizontal, Layers3, Wand2 } from 'lucide-react'
-import { sanitizeCardHtml } from '../lib/cardHtml.js'
+import { BookOpen, ChevronLeft, ChevronRight, PencilLine, Plus, Star, Trash2, Video, Volume2, Image, Bold, Italic, Underline, Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, Maximize2, Search, Sparkles, GripHorizontal, Layers3, Wand2, Flag, MessageSquare, MoreVertical, Settings, ExternalLink, Upload } from 'lucide-react'
+import { sanitizeCardHtml, buildCardValueFromTemplate, looksLikeHtml } from '../lib/cardHtml.js'
 import { SYSTEM_CARD_TEMPLATES, normalizeCardTemplate, getCardTemplates } from '../lib/cardTemplates.js'
 import CardContent from './CardContent.jsx'
 import CollapseToggle from './CollapseToggle.jsx'
 import TemplateManager from './TemplateManager.jsx'
 import DeckSelectOptions from './DeckSelectOptions.jsx'
+import Shell from './Shell.jsx'
 function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate, studyDeckId, cloud }) {
   const { deckId } = useParams()
   const navigate = useNavigate()
@@ -94,7 +95,7 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
       return
     }
     if (!front) {
-      setError('问题不能为空。')
+      setError('请填写背诵卡内容。')
       return
     }
 
@@ -230,7 +231,8 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
   }
 
   function speakPreview() {
-    const text = `${previewFront}。${previewBack}`.trim()
+    const text = `${previewFront}
+${previewBack}`.trim()
     if (!text || !window.speechSynthesis) {
       setStatusMessage('当前浏览器不支持朗读')
       return
@@ -295,9 +297,11 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
       />
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-gray-950">添加卡片</h1>
+          <h1 className="text-2xl font-black text-gray-950">添加卡片</h1><p className="mt-1 text-xs text-gray-500">单张制卡、粘贴 HTML/富文本，并实时预览。</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => navigate('/import')} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50"><Upload size={15} /> 批量制卡</button>
+          <a href="https://anki-card-maker-xi.vercel.app/" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50"><ExternalLink size={15} /> AI制卡器</a>
           <button type="button" onClick={() => navigate('/decks')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">取消</button>
           <button type="button" onClick={handleSave} className="h-10 px-5 rounded-xl bg-[#007aff] text-sm font-bold text-white shadow-sm hover:bg-[#006ee6]">保存</button>
         </div>
@@ -338,7 +342,7 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
               </label>
             </div>
 
-            <button type="button" onClick={() => setExpandedPane((current) => current === 'editor' ? null : 'editor')} title={expandedPane === 'editor' ? '恢复双栏' : '扩展编辑区'} className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-700 rounded-lg">
+            <button type="button" onClick={() => setExpandedPane((current) => current === 'editor' ? null : 'editor') } title={expandedPane === 'editor' ? '恢复双栏' : '扩展编辑区'} className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-700 rounded-lg">
               <Maximize2 size={16} />
             </button>
           </div>
@@ -433,7 +437,7 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
                     对齐
                     <select value={form.align} onChange={(event) => updateForm('align', event.target.value)} className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs">
                       <option value="left">左</option>
-                      <option value="center">中</option>
+                      <option value="center">居中</option>
                       <option value="right">右</option>
                     </select>
                   </label>
@@ -526,8 +530,7 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
                 </button>
                 <div className="flex items-center justify-end gap-3 text-sm text-gray-700">
                   <button type="button" onClick={() => movePreview(-1)} className="h-8 px-3 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center gap-1">
-                    <ChevronLeft size={14} /> 上一张
-                  </button>
+                    <ChevronLeft size={14} /> 上一张                  </button>
                   <span className="font-bold">{previewIndex + 1}/{previewItems.length}</span>
                   <button type="button" onClick={() => movePreview(1)} className="h-8 px-3 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center gap-1">
                     下一张 <ChevronRight size={14} />

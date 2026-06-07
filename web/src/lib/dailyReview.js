@@ -1,3 +1,4 @@
+import { DEFAULT_DECK_SECTIONS } from './constants.js'
 import { parseBulkCards } from '../cardImport.js'
 
 function parseDailyReview(content) {

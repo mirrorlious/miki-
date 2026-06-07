@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarDays, Target } from 'lucide-react'
+import { BookOpen, CalendarDays, Layers3, Target } from 'lucide-react'
 import { stats } from '../data.js'
 import { getStoredProfile } from '../lib/profile.js'
 import { getCalendarActivityMap, getMonthCalendarDays, getDateStudyDetails, getTodaySiteSeconds, getActivity, getFocusSummary, formatDuration } from '../lib/activity.js'
+import { getCountdownInfo, getDateLabel } from '../lib/dateUtils.js'
 
 function LearningOverviewPanel({ data }) {
   const [now, setNow] = useState(() => Date.now())

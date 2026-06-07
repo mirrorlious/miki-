@@ -1,8 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, ChevronRight, Edit, Gift, LogOut, Settings, User as UserIcon, Sparkles } from 'lucide-react'
 import { stats } from '../data.js'
 import { getRewardState } from '../lib/achievement.js'
+import { REWARD_OPTIONS } from '../lib/constants.js'
+import { getProfile } from '../lib/profile.js'
+import Shell from './Shell.jsx'
 import PixelItemIcon from './PixelItemIcon.jsx'
 import AchievementPanel from './AchievementPanel.jsx'
 

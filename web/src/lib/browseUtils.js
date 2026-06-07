@@ -69,14 +69,12 @@ function buildBrowseScopeTree(data) {
     return chain
   }
 
-  data.decks.forEach((deck) => {
-    const node = ensureChain(getDeckScopeParts(deck)).at(-1)
-    node.deckIds.add(deck.id)
-  })
-
   data.cards.forEach((card) => {
     const chain = ensureChain(getCardScopeParts(card, deckById))
-    chain.forEach((node) => node.cardIds.add(card.id))
+    chain.forEach((node) => {
+      node.cardIds.add(card.id)
+      if (card.deckId) node.deckIds.add(card.deckId)
+    })
   })
 
   function finalize(node) {

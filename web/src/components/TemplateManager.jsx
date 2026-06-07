@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { PencilLine, Trash2, BookOpen, GripHorizontal, List, Layers3, Maximize2 } from 'lucide-react'
-import { getCardSideHtml, getCardSideText, sanitizeCardHtml } from '../lib/cardHtml.js'
-import { SYSTEM_CARD_TEMPLATES, normalizeCardTemplate, getCardTemplates } from '../lib/cardTemplates.js'
+import { useEffect, useMemo, useState } from 'react'
+import { PencilLine, Trash2, BookOpen, GripHorizontal, List, Layers3, Maximize2, Plus, X } from 'lucide-react'
+import { getCardSideHtml, getCardSideText, sanitizeCardHtml, buildCardValueFromTemplate } from '../lib/cardHtml.js'
+import { SYSTEM_CARD_TEMPLATES, normalizeCardTemplate, getCardTemplates, getStoredCardTemplates } from '../lib/cardTemplates.js'
 import CardContent from './CardContent.jsx'
 
 function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onSaveTemplate, onDeleteTemplate, onClose }) {

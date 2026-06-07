@@ -1,4 +1,4 @@
-﻿import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ToolbarButton from './components/ToolbarButton.jsx'
 import PixelItemIcon from './components/PixelItemIcon.jsx'
@@ -12,6 +12,14 @@ import { motion } from 'framer-motion'
 import StudyNotePanel from './components/StudyNotePanel.jsx'
 import GradeButtons from './components/GradeButtons.jsx'
 import StudyHeader from './components/StudyHeader.jsx'
+import DeckDialog from './components/DeckDialog.jsx'
+import Dashboard from './components/Dashboard.jsx'
+import Decks from './components/Decks.jsx'
+import Organize from './components/Organize.jsx'
+import ImportCards from './components/ImportCards.jsx'
+import Browse from './components/BrowsePage.jsx'
+import KnowledgeMap from './components/KnowledgeMap.jsx'
+import Profile from './components/Profile.jsx'
 import DOMPurify from 'dompurify'
 import {
   AlignLeft,
@@ -75,11 +83,14 @@ import { getDateLabel, formatCountdown, formatCountdownWithDays, getCountdownInf
 import { makeLocalCacheData, persistDataToLocalCache } from './lib/storageUtils.js'
 import { getReviewReps, getCardReviewReps, makeNewCardReview, hasStartedCard, getReviewDueTime, isReviewDue, formatReviewDueLabel, makeDailyCardSourceKey } from './lib/reviewUtils.js'
 import { escapeHtmlText, makeTemplateFieldHtml, applyCardTemplateCode, buildCardValueFromTemplate } from './lib/cardHtml.js'
-import { DECK_COLOR_OPTIONS, DEFAULT_DECK_SECTIONS, UNGROUPED_SECTION, PROFESSIONAL_SECTIONS, ANNOTATION_TYPES, CHAPTER_MILESTONE_SECONDS, BUILTIN_DYL_PACK_ID } from './lib/constants.js'
-import { getDeckSection, getDeckChapter, getStableDeckColor, getDeckScopeParts, getDeckPath, getDeckOptionLabel, normalizePathPart, getSectionNames, sortDecksByPath, groupDecksBySection, getDeckChapterKey, getDeckChapterLabel, getDeckCards, getDeckOutlineRows, normalizeImportedAnkiCards } from './lib/deckUtils.js'
-import { getActiveStudyDays, getTopChapterTimeRows, addFocusSession } from './lib/activity.js'
-import { getInitialTheme } from './lib/theme.js'
-import { getCardAnnotations, getCardLinks, getCardFlagColor, makeScopeNode, getAnnotationWall, getCardAnnotationCount, getLinkedPairCount, isBuiltinDylItem } from './lib/browseUtils.js'
+import { DECK_COLOR_OPTIONS, DEFAULT_DECK_SECTIONS, UNGROUPED_SECTION, PROFESSIONAL_SECTIONS, ANNOTATION_TYPES, CHAPTER_MILESTONE_SECONDS, BUILTIN_DYL_PACK_ID, REWARD_OPTIONS } from './lib/constants.js'
+import { getDeckSection, getDeckChapter, getStableDeckColor, getDeckScopeParts, getDeckPath, getDeckOptionLabel, normalizePathPart, getSectionNames, sortDecksByPath, groupDecksBySection, getDeckChapterKey, getDeckChapterLabel, getDeckCards, getDeckOutlineRows, normalizeImportedAnkiCards, getAnkiDeckTarget, getDeckIdentityKey } from './lib/deckUtils.js'
+import { getActiveStudyDays, getTopChapterTimeRows, addFocusSession, getReviewLogs, addActivitySeconds, getDailyLogs, ACTIVITY_TICK_SECONDS, ACTIVITY_IDLE_TIMEOUT_MS } from './lib/activity.js'
+import { getInitialTheme, ThemeContext } from './lib/theme.js'
+import { getStoredProfile } from './lib/profile.js'
+import { getStoredCardTemplates, normalizeCardTemplate } from './lib/cardTemplates.js'
+import { getRewardState } from './lib/achievement.js'
+import { getCardAnnotations, getCardLinks, getCardFlagColor, makeScopeNode, getAnnotationWall, getCardAnnotationCount, getLinkedPairCount, isBuiltinDylItem, buildBrowseScopeTree, flattenScopeTree, findBestScopeNodeForDeck, isCardDue, isNewCard, getCardReviewStateLabel, hasStoredCardHtml, getCardHtmlSections } from './lib/browseUtils.js'
 import { stripBuiltinDylItems, makeBuiltinCardOverride, mergeBuiltinDylData } from './lib/builtinDylUtils.js'
 // --- Lib imports above, local constants below ---
 
@@ -376,7 +387,7 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
         canAdd={Boolean(deck)}
       />
 
-      <div className="max-w-3xl mx-auto w-full">
+      <div className="shell-stretch max-w-3xl mx-auto w-full">
 
         <StudyStatsPanel
           reviewed={session.reviewed}
@@ -616,6 +627,10 @@ export default function App() {
   }, [activeStudyDeckId])
 
   useEffect(() => {
+    // Browse/Organize 等页面不需要每 10 秒刷新整份 data。
+    // 否则会触发 localStorage、云同步 diff、目录树和卡片列表重算。
+    if (!activeStudyDeckId) return undefined
+
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       const tickedAt = Date.now()
@@ -707,6 +722,19 @@ export default function App() {
           reviewLogs: current.reviewLogs.filter((log) => !deletedCardIds.has(log.cardId)),
         }
       })
+    })
+  }
+
+  function deleteCards(cardIds = []) {
+    const ids = new Set((Array.isArray(cardIds) ? cardIds : [cardIds]).filter(Boolean))
+    if (ids.size === 0) return
+
+    startTransition(() => {
+      setData((current) => ({
+        ...current,
+        cards: current.cards.filter((card) => !ids.has(card.id)),
+        reviewLogs: current.reviewLogs.filter((log) => !ids.has(log.cardId)),
+      }))
     })
   }
 
@@ -1047,7 +1075,8 @@ export default function App() {
         <Route path="/" element={<Home data={appData} cloud={cloud} />} />
         <Route path="/app" element={<Dashboard data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/decks" element={<Decks data={appData} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} />} />
+        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteCards={deleteCards} />} />
+        <Route path="/map" element={<KnowledgeMap data={appData} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/organize" element={<Organize data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/profile" element={<Profile data={appData} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />

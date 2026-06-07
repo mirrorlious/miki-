@@ -1,23 +1,45 @@
-import { useState, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BookOpen, ChevronDown, FileText, Upload, FolderOpen, Sparkles, Check, X, Loader } from 'lucide-react'
+import { BookOpen, ChevronDown, ExternalLink, FileText, Upload, FolderOpen, Sparkles, Check, X, Loader, Wand2 } from 'lucide-react'
 import { parseApkgFile } from '../apkgImport.js'
 import { parseBulkCards, parseMarkdownCards } from '../cardImport.js'
-import { getDeckSection, getDeckChapter, getStableDeckColor, summarizeAnkiDeckTargets, getDeckIdentityKey } from '../lib/deckUtils.js'
+import { buildCardValueFromTemplate } from '../lib/cardHtml.js'
+import { getCardTemplates } from '../lib/cardTemplates.js'
+import { getDeckSection, getDeckChapter, getStableDeckColor, summarizeAnkiDeckTargets, getDeckIdentityKey, getDeckOptionLabel, getDeckPath } from '../lib/deckUtils.js'
 import Shell from './Shell.jsx'
 import ToolbarButton from './ToolbarButton.jsx'
+import CardContent from './CardContent.jsx'
+import DeckSelectOptions from './DeckSelectOptions.jsx'
 
 function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
   const navigate = useNavigate()
   const [selectedDeckId, setSelectedDeckId] = useState(data.decks[0]?.id ?? '')
   const [importMode, setImportMode] = useState('qa')
+  const [selectedTemplateId, setSelectedTemplateId] = useState('qa')
+  const [templateMode, setTemplateMode] = useState('plain')
   const [rawText, setRawText] = useState('')
   const [apkgImport, setApkgImport] = useState(null)
   const [isParsingFile, setIsParsingFile] = useState(false)
   const [message, setMessage] = useState('')
-  const parsedTextCards = useMemo(() => (
+  const cardTemplates = useMemo(() => getCardTemplates(data), [data])
+  const plainTemplates = useMemo(() => cardTemplates.filter((template) => template.mode !== 'html'), [cardTemplates])
+  const htmlTemplates = useMemo(() => cardTemplates.filter((template) => template.mode === 'html'), [cardTemplates])
+  const visibleTemplates = templateMode === 'html' ? htmlTemplates : plainTemplates
+  const selectedTemplate = visibleTemplates.find((template) => template.id === selectedTemplateId)
+    ?? visibleTemplates[0]
+    ?? cardTemplates[0]
+  const rawParsedTextCards = useMemo(() => (
     importMode === 'markdown' ? parseMarkdownCards(rawText) : parseBulkCards(rawText)
   ), [importMode, rawText])
+  const parsedTextCards = useMemo(() => rawParsedTextCards.map((card) => {
+    const value = buildCardValueFromTemplate({
+      ...card,
+      template: selectedTemplate?.id ?? selectedTemplateId,
+      front: card.front ?? '',
+      back: card.back ?? '',
+    }, selectedTemplate)
+    return { ...card, ...value, template: selectedTemplate?.id ?? selectedTemplateId }
+  }), [rawParsedTextCards, selectedTemplate, selectedTemplateId])
   const parsedCards = importMode === 'anki' ? (apkgImport?.cards ?? []) : parsedTextCards
   const ankiDeckSummaries = useMemo(() => apkgImport?.deckSummaries ?? [], [apkgImport])
 
@@ -26,6 +48,16 @@ function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
       setSelectedDeckId(data.decks[0]?.id ?? '')
     }
   }, [data.decks, selectedDeckId])
+
+  useEffect(() => {
+    if (visibleTemplates.some((template) => template.id === selectedTemplateId)) return
+    const preferredHtmlTemplate = htmlTemplates.find((template) => template.id === 'quiz-choice-control-center')
+    setSelectedTemplateId(
+      templateMode === 'html'
+        ? (preferredHtmlTemplate?.id ?? visibleTemplates[0]?.id ?? 'html')
+        : (visibleTemplates[0]?.id ?? 'qa'),
+    )
+  }, [htmlTemplates, selectedTemplateId, templateMode, visibleTemplates])
 
   function handleImport() {
     if (!selectedDeckId && importMode !== 'anki') {
@@ -110,7 +142,19 @@ constraint\t限制；约束条件`
 - 盐度
   - 约为海水的 7 倍
   - 密度较高，能让人漂浮`
-  const sampleText = importMode === 'markdown' ? markdownSampleText : qaSampleText
+  const quizChoiceSampleText = `【单选】下列关于正当防卫的说法，正确的是哪一项？
+A. 只要主观上认为有危险，就一定成立正当防卫
+B. 必须存在现实的不法侵害
+C. 防卫对象可以是任何第三人
+D. 防卫行为没有限度要求
+答案：B
+标签：刑法总论｜正当防卫
+解析：正当防卫要求存在现实的不法侵害，假想防卫不能直接成立正当防卫。`
+  const sampleText = selectedTemplate?.id === 'quiz-choice-control-center'
+    ? quizChoiceSampleText
+    : importMode === 'markdown'
+      ? markdownSampleText
+      : qaSampleText
   const importVerb = importMode === 'markdown' ? '同步' : '导入'
   const pageSubtitle = importMode === 'anki'
     ? '导入 Anki APKG/COLPKG，按 A 刑法学、B 民法学这类大科目自动分组，并保留可安全显示的静态 HTML。'
@@ -122,10 +166,11 @@ constraint\t限制；约束条件`
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-gray-950">批量导入</h1>
+          <h1 className="text-2xl font-black text-gray-950">批量制卡</h1>
           <p className="text-sm text-gray-500 mt-1">{pageSubtitle}</p>
         </div>
         <div className="flex gap-2">
+          <a href="https://anki-card-maker-xi.vercel.app/" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50"><ExternalLink size={15} /> AI制卡器</a>
           <button onClick={() => navigate('/decks')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">取消</button>
           <button onClick={handleImport} className="h-10 px-5 rounded-xl bg-[#007aff] text-sm font-bold text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300" disabled={parsedCards.length === 0 || isParsingFile}>
             {importVerb} {parsedCards.length} 张
@@ -166,6 +211,35 @@ constraint\t限制；约束条件`
                 <DeckSelectOptions decks={data.decks} />
               </select>
             </label>
+
+            {importMode !== 'anki' && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 p-1.5">
+                <span className="px-1 text-xs font-black text-gray-400">模板类型</span>
+                {[
+                  { value: 'plain', label: '普通' },
+                  { value: 'html', label: 'HTML' },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      setTemplateMode(option.value)
+                      setMessage('')
+                    }}
+                    className={`h-8 rounded-lg px-3 text-xs font-black transition-colors ${templateMode === option.value ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                <select
+                  value={selectedTemplate?.id ?? selectedTemplateId}
+                  onChange={(event) => setSelectedTemplateId(event.target.value)}
+                  className="h-8 min-w-48 rounded-lg border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 outline-none focus:border-[#007aff]"
+                >
+                  {visibleTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+                </select>
+              </div>
+            )}
 
             <label className="h-10 px-4 rounded-xl bg-gray-100 text-sm font-bold text-gray-700 hover:bg-gray-200 cursor-pointer flex items-center gap-2">
               <Upload size={16} />
@@ -278,6 +352,19 @@ constraint\t限制；约束条件`
               </div>
             </div>
           </section>
+
+          {importMode !== 'anki' && selectedTemplate && (
+            <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
+              <div className="p-5">
+                <p className="text-xs font-black text-gray-400 mb-2">当前模板</p>
+                <h2 className="text-sm font-black text-gray-950">{selectedTemplate.name}</h2>
+                <p className="mt-2 text-xs leading-5 text-gray-500">{selectedTemplate.description || '按所选模板批量生成卡片。'}</p>
+                {selectedTemplate.id === 'quiz-choice-control-center' && (
+                  <p className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold leading-5 text-blue-700">输入格式建议：题干 + A/B/C/D 选项；答案区写“答案：B”“标签：刑法｜正当防卫”“解析：……”即可。</p>
+                )}
+              </div>
+            </section>
+          )}
 
           {importMode !== 'anki' && (
             <section className="rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
