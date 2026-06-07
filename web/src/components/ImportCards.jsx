@@ -26,10 +26,23 @@ function ImportCards({ data, onCreateCards, onSaveCardTemplate, onDeleteCardTemp
   const cardTemplates = useMemo(() => getCardTemplates(data), [data])
   const plainTemplates = useMemo(() => cardTemplates.filter((template) => template.mode !== 'html'), [cardTemplates])
   const htmlTemplates = useMemo(() => cardTemplates.filter((template) => template.mode === 'html'), [cardTemplates])
-  const visibleTemplates = templateMode === 'html' ? htmlTemplates : plainTemplates
-  const selectedTemplate = visibleTemplates.find((template) => template.id === selectedTemplateId)
+  const visibleTemplates = templateMode === 'html' ? cardTemplates : plainTemplates
+  const selectedTemplateBase = visibleTemplates.find((template) => template.id === selectedTemplateId)
     ?? visibleTemplates[0]
     ?? cardTemplates[0]
+  const selectedTemplate = useMemo(() => {
+    if (!selectedTemplateBase) return selectedTemplateBase
+    if (templateMode !== 'html' || selectedTemplateBase.mode === 'html') return selectedTemplateBase
+
+    return {
+      ...selectedTemplateBase,
+      mode: 'html',
+      frontCode: selectedTemplateBase.frontCode || '{{正面}}',
+      backCode: selectedTemplateBase.backCode || '{{反面}}',
+      css: selectedTemplateBase.css || '',
+      js: selectedTemplateBase.js || '',
+    }
+  }, [selectedTemplateBase, templateMode])
   const rawParsedTextCards = useMemo(() => (
     importMode === 'markdown' ? parseMarkdownCards(rawText) : parseBulkCards(rawText)
   ), [importMode, rawText])
@@ -238,7 +251,11 @@ D. 防卫行为没有限度要求
                   onChange={(event) => setSelectedTemplateId(event.target.value)}
                   className="h-8 min-w-48 rounded-lg border border-gray-200 bg-white px-3 text-xs font-black text-gray-700 outline-none focus:border-[#007aff]"
                 >
-                  {visibleTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+                  {visibleTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {templateMode === 'html' && template.mode !== 'html' ? `${template.name}（HTML）` : template.name}
+                    </option>
+                  ))}
                 </select>
                 <button
                   type="button"
