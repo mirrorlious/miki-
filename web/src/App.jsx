@@ -1,4 +1,4 @@
-import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ToolbarButton from './components/ToolbarButton.jsx'
 import PixelItemIcon from './components/PixelItemIcon.jsx'
@@ -7,7 +7,11 @@ import CardContent from './components/CardContent.jsx'
 import AuthDialog from './components/AuthDialog.jsx'
 import Shell from './components/Shell.jsx'
 import StudyCardView from './components/StudyCardView.jsx'
+import StudyStatsPanel from './components/StudyStatsPanel.jsx'
 import { motion } from 'framer-motion'
+import StudyNotePanel from './components/StudyNotePanel.jsx'
+import GradeButtons from './components/GradeButtons.jsx'
+import StudyHeader from './components/StudyHeader.jsx'
 import DOMPurify from 'dompurify'
 import {
   AlignLeft,
@@ -349,61 +353,41 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
   }, [activeCard, handleGrade, revealed, revealAnswer])
 
   const studyNotePanel = activeCard ? (
-    <div className="mx-auto w-full max-w-2xl text-left">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-black text-gray-950">我的笔记</h3>
-        <button
-          type="button"
-          onClick={saveStudyNote}
-          className="h-8 rounded-lg bg-gray-900 px-3 text-[11px] font-black text-white disabled:bg-gray-300"
-          disabled={!studyNoteDirty || !onUpdateCardMeta}
-        >
-          保存
-        </button>
-      </div>
-      <textarea
-        value={studyNoteDraft}
-        onChange={(event) => setStudyNoteDraft(event.target.value)}
-        placeholder="写下这张卡的理解、易错点或补充材料"
-        className="min-h-[110px] w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm leading-6 text-gray-700 outline-none focus:border-[#007aff] focus:bg-white"
-      />
-    </div>
+    <StudyNotePanel
+      note={studyNoteDraft}
+      onChangeNote={setStudyNoteDraft}
+      onSave={saveStudyNote}
+      dirty={studyNoteDirty}
+      canUpdate={Boolean(onUpdateCardMeta)}
+    />
   ) : null
 
   return (
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId}>
-      <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-gray-950">{deck?.name ?? '学习模式'}</h1>
-          <p className="text-xs text-gray-500 mt-1">{activeDeckPath || '还没有可学习的卡组'} · 待复习 {queue.length}，本牌组 {studyCards.length} 张。</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={drawDrillCard} className="h-10 px-4 rounded-xl bg-[#34c759] text-sm font-bold text-white shadow-sm hover:bg-[#30b454]" disabled={drillCards.length === 0}>抽背</button>
-          <button onClick={() => deck && navigate(`/cards/new/${deck.id}`)} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50" disabled={!deck}>添加</button>
-          <button onClick={() => navigate('/decks')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">结束</button>
-        </div>
-      </header>
+      <StudyHeader
+        deckName={deck?.name}
+        deckPath={activeDeckPath}
+        dueCount={queue.length}
+        cardCount={studyCards.length}
+        drillCount={drillCards.length}
+        onDrawDrill={drawDrillCard}
+        onNavigateAdd={() => deck && navigate(`/cards/new/${deck.id}`)}
+        onNavigateDecks={() => navigate('/decks')}
+        canAdd={Boolean(deck)}
+      />
 
       <div className="max-w-3xl mx-auto w-full">
-        <section className="mb-4 rounded-2xl bg-white/90 border border-white shadow-sm overflow-hidden">
-          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
-            {[
-              { label: '本轮', value: session.reviewed, detail: sessionTotal ? `${progressPercent}%` : '待开始' },
-              { label: '到期', value: queue.length, detail: activeIsDrill ? '抽背中' : '当前队列' },
-              { label: '已学', value: reviewedCards, detail: `${newCards} 张新卡` },
-              { label: '稳固', value: masteredCards, detail: '间隔 7 天+' },
-            ].map((item) => (
-              <div key={item.label} className="px-4 py-3">
-                <p className="text-[11px] font-black text-gray-300">{item.label}</p>
-                <p className="mt-1 text-2xl font-black text-gray-950">{item.value}</p>
-                <p className="mt-0.5 text-[11px] font-bold text-gray-400">{item.detail}</p>
-              </div>
-            ))}
-          </div>
-          <div className="h-1 bg-gray-100">
-            <div className="h-full bg-[#34c759] transition-all duration-300" style={{ width: `${progressPercent}%` }} />
-          </div>
-        </section>
+
+        <StudyStatsPanel
+          reviewed={session.reviewed}
+          dueCount={queue.length}
+          isDrill={activeIsDrill}
+          progressPercent={progressPercent}
+          reviewedCount={reviewedCards}
+          newCardCount={newCards}
+          masteredCount={masteredCards}
+          sessionTotal={sessionTotal}
+        />
 
         <section className="mb-4 rounded-2xl bg-white/90 border border-white shadow-sm p-4">
           <div className="flex flex-col gap-3">
@@ -516,25 +500,7 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
             {studyNotePanel}
           </section>
         )}
-
-        {revealed && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {gradeOptionsWithDue.map((option) => (
-              <button
-                key={option.grade}
-                type="button"
-                onClick={() => handleGrade(option.grade)}
-                title={option.title}
-                className={`min-h-16 rounded-xl border px-3 py-3 text-left font-black transition-colors ${option.className}`}
-              >
-                <span className="block text-base">{option.label}</span>
-                <span className="mt-1 block text-xs opacity-75">{option.detail}</span>
-                <span className="mt-2 block text-[11px] opacity-80">下次：{option.dueLabel}</span>
-                <span className="mt-1 block text-[11px] opacity-60">本轮 {session.grades[option.grade] ?? 0}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        {revealed && <GradeButtons options={gradeOptionsWithDue} sessionGrades={session.grades} onGrade={handleGrade} />}
       </div>
     </Shell>
   )
