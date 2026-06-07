@@ -1,3 +1,4 @@
+import { getStoredProfile } from './profile.js'
 function getDateLabel(dateKey) {
   return new Date(${dateKey}T00:00:00).toLocaleDateString('zh-CN', {
     month: 'long',
@@ -31,4 +32,26 @@ function formatStudyDate(dateKey) {
   })
 }
 
-export { getDateLabel, formatCountdown, formatCountdownWithDays, formatStudyDate }
+function getCountdownInfo(data, now) {
+  const profile = getStoredProfile(data)
+  if (profile.examDate) {
+    const target = new Date(${profile.examDate}T23:59:59).getTime()
+    if (target > now) {
+      return {
+        label: '考试倒计时',
+        detail: profile.examDate,
+        value: formatCountdownWithDays(target - now),
+      }
+    }
+  }
+
+  const currentDate = new Date(now)
+  const endOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + 1)
+  return {
+    label: '今日倒计时',
+    detail: '到今晚 24:00',
+    value: formatCountdown(endOfDay.getTime() - now),
+  }
+}
+
+export { getDateLabel, formatCountdown, formatCountdownWithDays, formatStudyDate, getCountdownInfo }
