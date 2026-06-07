@@ -33,7 +33,7 @@ function getCardScopeParts(card, deckById) {
 }
 
 function getScopeKey(parts) {
-  return parts.length === 0 ? 'all' : scope:
+  return parts.length === 0 ? 'all' : `scope:${parts.join(':')}`
 }
 
 function makeScopeNode(parts) {
@@ -107,7 +107,7 @@ function findBestScopeNodeForDeck(scopeNodes, deckId) {
 function compactCardText(value = '', maxLength = 180) {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim()
   if (text.length <= maxLength) return text
-  return ${text.slice(0, maxLength).trim()}...
+  return `${text.slice(0, maxLength).trim()}...`
 }
 
 function getCardHtmlSections(card) {
@@ -140,13 +140,13 @@ function isBuiltinDylItem(item) {
 function getRelatedSuggestions(data, card, limit = 4) {
   if (!card) return []
   const linkedIds = new Set(getCardLinks(card))
-  const baseTokens = tokenizeForRelated(${card.front} )
+  const baseTokens = tokenizeForRelated(`${card.front} ${card.back || ''}`)
   if (baseTokens.size === 0 && !card.source?.path?.join('/')) return []
 
   return data.cards
     .filter((item) => item.id !== card.id && !linkedIds.has(item.id))
     .map((item) => {
-      const itemTokens = tokenizeForRelated(${item.front} )
+      const itemTokens = tokenizeForRelated(`${item.front} ${item.back || ''}`)
       let score = 0
       if (card.source?.path?.join('/') && item.source?.path?.join('/') === card.source.path.join('/')) score += 4
       let overlap = 0

@@ -30,7 +30,7 @@ function getReviewDueTime(review) {
     if (Number.isFinite(dueAt)) return dueAt
   }
   if (review?.dueDate) {
-    const dueDate = new Date(${review.dueDate}T00:00:00).getTime()
+    const dueDate = new Date(`${review.dueDate}T00:00:00`).getTime()
     if (Number.isFinite(dueDate)) return dueDate
   }
   return 0
@@ -47,14 +47,14 @@ function formatReviewDueLabel(review) {
   const diffMs = dueAt - Date.now()
   if (diffMs <= 0) return '现在'
   const minutes = Math.max(1, Math.round(diffMs / 60000))
-  if (minutes < 60) return ${minutes}分钟后
-  if (minutes < 24 * 60) return ${Math.round(minutes / 60)}小时后
+  if (minutes < 60) return `${minutes}分钟后`
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)}小时后`
   const days = Math.ceil(minutes / (24 * 60))
-  return ${days}天后
+  return `${days}天后`
 }
 
 function makeDailyCardSourceKey(dateKey, card, index) {
-  return daily:::
+  return `daily:${dateKey}:${card.id || index}`
 }
 
 export { getReviewReps, getCardReviewReps, makeNewCardReview, hasStartedCard, getReviewDueTime, isReviewDue, formatReviewDueLabel, makeDailyCardSourceKey }

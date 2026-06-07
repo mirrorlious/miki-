@@ -1,7 +1,7 @@
 import { createContext } from 'react'
 import { STORAGE_KEY } from '../data.js'
 
-const APP_THEME_STORAGE_KEY = ${STORAGE_KEY}:theme
+const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
 
 function getInitialTheme() {
   if (typeof window === 'undefined') return 'light'

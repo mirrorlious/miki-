@@ -28,11 +28,11 @@ function getDeckScopeParts(deck) {
 function getDeckPath(deck) {
   const section = getDeckSection(deck)
   const chapter = getDeckChapter(deck)
-  return chapter ? ${section} /  : section
+  return chapter ? `${section} / ${chapter}` : section
 }
 
 function getDeckOptionLabel(deck) {
-  return ${getDeckPath(deck)} / 
+  return `${getDeckPath(deck)} / ${deck?.name}`
 }
 
 function normalizePathPart(value = '') {
@@ -75,7 +75,7 @@ function getAnkiDeckTarget(card, fallbackDeck) {
       section: 'Anki 导入',
       chapter: '',
       name: sourcePath[0],
-      description: 从 Anki 原卡组  导入。,
+      description: `从 Anki 原卡组 ${sourcePath[0]} 导入。`,
     }
   }
 
@@ -87,7 +87,7 @@ function getAnkiDeckTarget(card, fallbackDeck) {
       section,
       chapter: '',
       name,
-      description: 从 Anki 原卡组  导入，按大科目  归组。,
+      description: `从 Anki 原卡组 ${sourcePath[0]} 导入，按大科目 ${name} 归组。`,
     }
   }
 
@@ -99,7 +99,7 @@ function getAnkiDeckTarget(card, fallbackDeck) {
     section,
     chapter,
     name,
-    description: 从 Anki 原卡组  导入。,
+    description: `从 Anki 原卡组 ${sourcePath[0]} 导入。`,
   }
 }
 
@@ -148,12 +148,12 @@ function groupDecksBySection(decks) {
 }
 
 function getDeckChapterKey(deck) {
-  return ${getDeckSection(deck)}|||
+  return `${getDeckSection(deck)}||${getDeckChapter(deck)}`
 }
 
 function getDeckChapterLabel(deck) {
   const chapter = getDeckChapter(deck)
-  return chapter ? getDeckPath(deck) : ${getDeckSection(deck)} / 未细分
+  return chapter ? getDeckPath(deck) : `${getDeckSection(deck)} / 未细分`
 }
 
 function getDeckCards(data, deckId) {

@@ -1,6 +1,6 @@
 import { getStoredProfile } from './profile.js'
 function getDateLabel(dateKey) {
-  return new Date(${dateKey}T00:00:00).toLocaleDateString('zh-CN', {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('zh-CN', {
     month: 'long',
     day: 'numeric',
     weekday: 'short',
@@ -12,7 +12,7 @@ function formatCountdown(totalMs) {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const restSeconds = seconds % 60
-  return ${String(hours).padStart(2, '0')}::
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(restSeconds).padStart(2, '0')}`
 }
 
 function formatCountdownWithDays(totalMs) {
@@ -20,11 +20,11 @@ function formatCountdownWithDays(totalMs) {
   const days = Math.floor(seconds / 86400)
   const rest = seconds % 86400
   const clock = formatCountdown(rest * 1000)
-  return days > 0 ? ${days}天  : clock
+  return days > 0 ? `${days}天 ` : clock
 }
 
 function formatStudyDate(dateKey) {
-  return new Date(${dateKey}T00:00:00).toLocaleDateString('zh-CN', {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -35,7 +35,7 @@ function formatStudyDate(dateKey) {
 function getCountdownInfo(data, now) {
   const profile = getStoredProfile(data)
   if (profile.examDate) {
-    const target = new Date(${profile.examDate}T23:59:59).getTime()
+    const target = new Date(`${profile.examDate}T23:59:59`).getTime()
     if (target > now) {
       return {
         label: '考试倒计时',
