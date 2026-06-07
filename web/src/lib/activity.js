@@ -1,5 +1,5 @@
 import { getDeckChapterKey, getDeckChapterLabel } from "./deckUtils.js"
-import { todayKey, dateKey } from "./data.js"
+import { todayKey, dateKey } from "../data.js"
 import { getStoredProfile } from "./profile.js"
 
 const ACTIVITY_TICK_SECONDS = 10
@@ -211,7 +211,7 @@ function addFocusSession(current, deckId) {
       ...activity,
       focusSessions: activity.focusSessions + 1,
       focusLog: [
-        { id: ocus-, deckId, startedAt: Date.now() },
+        { id: `focus-${deckId}`, deckId, startedAt: Date.now() },
         ...activity.focusLog,
       ].slice(0, 200),
       updatedAt: Date.now(),

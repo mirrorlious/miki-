@@ -1,14 +1,14 @@
 const DECK_COLOR_OPTIONS = [
-  { value: 'sun', label: '鏆栭粍', cardClass: 'bg-yellow-50/80 border-yellow-100/50', pillClass: 'bg-yellow-100 text-yellow-700' },
-  { value: 'sea', label: '娴呰摑', cardClass: 'bg-blue-50/80 border-blue-100/50', pillClass: 'bg-blue-100 text-blue-700' },
-  { value: 'rose', label: '娴呯矇', cardClass: 'bg-rose-50/80 border-rose-100/50', pillClass: 'bg-rose-100 text-rose-700' },
-  { value: 'mint', label: '钖勮嵎', cardClass: 'bg-emerald-50/80 border-emerald-100/50', pillClass: 'bg-emerald-100 text-emerald-700' },
+  { value: 'sun', label: '暖黄', cardClass: 'bg-yellow-50/80 border-yellow-100/50', pillClass: 'bg-yellow-100 text-yellow-700' },
+  { value: 'sea', label: '浅蓝', cardClass: 'bg-blue-50/80 border-blue-100/50', pillClass: 'bg-blue-100 text-blue-700' },
+  { value: 'rose', label: '浅粉', cardClass: 'bg-rose-50/80 border-rose-100/50', pillClass: 'bg-rose-100 text-rose-700' },
+  { value: 'mint', label: '薄荷', cardClass: 'bg-emerald-50/80 border-emerald-100/50', pillClass: 'bg-emerald-100 text-emerald-700' },
 ]
 
-const DEFAULT_DECK_SECTIONS = ['娉曠悊', '瀹硶', '姘戞硶', '鍒戞硶', '娉曞埗鍙?, '鏀挎不', '鑻辫', '瑙勫緥涓撻']
-const UNGROUPED_SECTION = '鏈垎缁?
-const PROFESSIONAL_SECTIONS = ['娉曠悊', '瀹硶', '姘戞硶', '鍒戞硶', '娉曞埗鍙?]
-const ANNOTATION_TYPES = ['鐞嗚В', '鏄撻敊', '鍙ｈ瘈', '娉曟潯', '妗堜緥', '瀵规瘮']
+const DEFAULT_DECK_SECTIONS = ['法理', '宪法', '民法', '刑法', '法制史', '政治', '英语', '规律专题']
+const UNGROUPED_SECTION = '未分组'
+const PROFESSIONAL_SECTIONS = ['法理', '宪法', '民法', '刑法', '法制史']
+const ANNOTATION_TYPES = ['理解', '易错', '口诀', '法条', '案例', '对比']
 const CHAPTER_MILESTONE_SECONDS = 10 * 60
 const BUILTIN_DYL_PACK_ID = 'dyl-exam'
 const PIXEL_ITEM_BADGES = {
@@ -54,8 +54,8 @@ const PIXEL_ITEM_BADGES = {
 const ACHIEVEMENTS = [
   {
     id: 'first-card',
-    title: '鐭ヨ瘑缁跨爾',
-    description: '閾稿嚭绗?1 鍧楃煡璇嗙爾',
+    title: '知识绿砖',
+    description: '铸出第 1 块知识砖',
     points: 10,
     icon: 'card',
     color: '#34c759',
@@ -64,8 +64,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'daily-review',
-    title: '鏃ュ巻鐭崇',
-    description: '鍦ㄤ粖澶╃珛涓嬩竴鍧楀鐩樼煶纰?,
+    title: '日历石碑',
+    description: '在今天立下一块复盘石碑',
     points: 10,
     icon: 'calendar',
     color: '#007aff',
@@ -74,8 +74,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'first-review',
-    title: '澶嶄範缃楃洏',
-    description: '鐐逛寒绗?1 娆″涔犺瘎鍒?,
+    title: '复习罗盘',
+    description: '点亮第 1 次复习评分',
     points: 15,
     icon: 'review',
     color: '#ff9f0a',
@@ -84,8 +84,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'first-note',
-    title: '鎵规敞鍗疯酱',
-    description: '鍐欎笅绗?1 鏉＄悊瑙ｆ壒娉?,
+    title: '批注卷轴',
+    description: '写下第 1 条理解批注',
     points: 10,
     icon: 'note',
     color: '#af52de',
@@ -94,8 +94,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'first-link',
-    title: '绾跨储閿侀摼',
-    description: '鎶?2 寮犵浉鍏冲崱鐗囨墸鎴愪竴鐜?,
+    title: '线索锁链',
+    description: '把 2 张相关卡片扣成一环',
     points: 15,
     icon: 'link',
     color: '#5ac8fa',
@@ -104,8 +104,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'first-folder',
-    title: '褰掓。瀹濈',
-    description: '鎶?1 涓崱缁勬斁杩涙澘鍧楀疂绠?,
+    title: '归档宝箱',
+    description: '把 1 个卡组放进板块宝箱',
     points: 10,
     icon: 'folder',
     color: '#5856d6',
@@ -114,8 +114,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'three-days',
-    title: '涓夋棩钀ョ伀',
-    description: '杩炵画鐐硅捣 3 澶╁涔犵伀鍏?,
+    title: '三日营火',
+    description: '连续点起 3 天学习火光',
     points: 20,
     icon: 'flame',
     color: '#ff3b30',
@@ -124,8 +124,8 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'first-focus',
-    title: '涓撴敞鍒濆搷',
-    description: '寮€鍚 1 娆″涔犱笓娉?,
+    title: '专注初响',
+    description: '开启第 1 次学习专注',
     points: 10,
     icon: 'focus',
     color: '#007aff',
@@ -134,35 +134,35 @@ const ACHIEVEMENTS = [
   },
   {
     id: 'chapter-clock',
-    title: '绔犺妭娌欐紡',
-    description: '浠讳竴绔犺妭绱瀛︿範 10 鍒嗛挓',
+    title: '章节沙漏',
+    description: '任一章节累计学习 10 分钟',
     points: 20,
     icon: 'timer',
     color: '#af52de',
     isEarned: (data) => getTopChapterTimeRows(data, 1).some((row) => row.seconds >= CHAPTER_MILESTONE_SECONDS),
-    progress: (data) => `${Math.min(Math.floor((getTopChapterTimeRows(data, 1)[0]?.seconds ?? 0) / 60), 10)}/10 鍒嗛挓`,
+    progress: (data) => `${Math.min(Math.floor((getTopChapterTimeRows(data, 1)[0]?.seconds ?? 0) / 60), 10)}/10 分钟`,
   },
 ]
 
 const REWARD_OPTIONS = [
   {
     id: 'focus-pass',
-    title: '涓撴敞閫氳璇?,
-    description: '缁欎粖澶╃殑瀛︿範椤佃В閿佷竴鏋氫笓娉ㄥ窘绔犮€?,
+    title: '专注通行证',
+    description: '给今天的学习页解锁一枚专注徽章。',
     cost: 20,
     badge: 'Focus',
   },
   {
     id: 'profile-frame',
-    title: '瀛︿範璐寸焊',
-    description: '鍦ㄤ釜浜洪〉鏍囪涓€鏋氬凡鍏戞崲瀛︿範璐寸焊銆?,
+    title: '学习贴纸',
+    description: '在个人页标记一枚已兑换学习贴纸。',
     cost: 40,
     badge: 'Sticker',
   },
   {
     id: 'vip-week',
-    title: '浼氬憳浣撻獙鍒?,
-    description: '棰勭暀缁欏悗缁珮绾у姛鑳界殑 7 澶╀綋楠岃祫鏍笺€?,
+    title: '会员体验券',
+    description: '预留给后续高级功能的 7 天体验资格。',
     cost: 80,
     badge: 'VIP',
   },
