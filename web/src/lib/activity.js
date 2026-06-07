@@ -1,3 +1,4 @@
+import { getDeckChapterKey, getDeckChapterLabel } from "./deckUtils.js"
 import { todayKey, dateKey } from "./data.js"
 import { getStoredProfile } from "./profile.js"
 
@@ -161,4 +162,61 @@ function addActivitySeconds(current, seconds, activeDeckId = null) {
   }
 }
 
-export { toLocalDateKey, getDailyLogs, getReviewLogs, getDailyLog, getActivity, getTodaySiteSeconds, formatDuration, getMonthCalendarDays, getCalendarActivityMap, getDateStudyDetails, getTodayFocusCount, getFocusSummary, addActivitySeconds }
+function getActiveStudyDays(data) {
+  const days = new Set()
+  for (const log of getDailyLogs(data)) {
+    if (log.date) days.add(log.date)
+  }
+  for (const log of getReviewLogs(data)) {
+    if (log.reviewedAt) days.add(toLocalDateKey(log.reviewedAt))
+  }
+  for (const card of data.cards) {
+    if (card.createdAt) days.add(toLocalDateKey(card.createdAt))
+  }
+  return Array.from(days).sort()
+}
+
+function getTopChapterTimeRows(data, limit = 4) {
+  const activity = getActivity(data)
+  const rows = new Map()
+
+  for (const [deckId, rawSeconds] of Object.entries(activity.deckSeconds)) {
+    const deck = data.decks.find((item) => item.id === deckId)
+    if (!deck) continue
+    const raw = Math.max(0, Number(rawSeconds) || 0)
+    const siteCap = activity.siteSeconds > 0 ? activity.siteSeconds : raw
+    const seconds = Math.min(raw, siteCap, 12 * 60 * 60)
+    const key = getDeckChapterKey(deck)
+    const current = rows.get(key) ?? {
+      key,
+      label: getDeckChapterLabel(deck),
+      seconds: 0,
+      deckCount: 0,
+    }
+    current.seconds += seconds
+    current.deckCount += 1
+    rows.set(key, current)
+  }
+
+  return Array.from(rows.values())
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, limit)
+}
+
+function addFocusSession(current, deckId) {
+  const activity = getActivity(current)
+  return {
+    ...current,
+    activity: {
+      ...activity,
+      focusSessions: activity.focusSessions + 1,
+      focusLog: [
+        { id: ocus-, deckId, startedAt: Date.now() },
+        ...activity.focusLog,
+      ].slice(0, 200),
+      updatedAt: Date.now(),
+    },
+  }
+}
+
+export { toLocalDateKey, getDailyLogs, getReviewLogs, getDailyLog, getActivity, getTodaySiteSeconds, formatDuration, getMonthCalendarDays, getCalendarActivityMap, getDateStudyDetails, getTodayFocusCount, getFocusSummary, addActivitySeconds, getActiveStudyDays, getTopChapterTimeRows, addFocusSession }
