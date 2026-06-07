@@ -699,6 +699,119 @@ export default function App() {
     })
   }
 
+  function normalizeDeckPathParts(parts = []) {
+    return Array.isArray(parts)
+      ? parts.map((part) => normalizePathPart(part)).filter(Boolean)
+      : []
+  }
+
+  function startsWithPath(parts = [], prefix = []) {
+    if (!prefix.length) return true
+    if (parts.length < prefix.length) return false
+    return prefix.every((part, index) => normalizePathPart(parts[index]).toLowerCase() === normalizePathPart(part).toLowerCase())
+  }
+
+  function replacePathPrefix(parts = [], sourceParts = [], targetParts = []) {
+    const cleanParts = normalizeDeckPathParts(parts)
+    const cleanSource = normalizeDeckPathParts(sourceParts)
+    const cleanTarget = normalizeDeckPathParts(targetParts)
+    if (!cleanTarget.length) return cleanParts
+    if (cleanSource.length && startsWithPath(cleanParts, cleanSource)) {
+      return [...cleanTarget, ...cleanParts.slice(cleanSource.length)]
+    }
+    return [...cleanTarget, ...cleanParts.slice(-1)]
+  }
+
+  function deckFromFullParts(deck, parts = []) {
+    const cleanParts = normalizeDeckPathParts(parts)
+    if (cleanParts.length === 0) return deck
+    if (cleanParts.length === 1) {
+      return {
+        ...deck,
+        section: getDeckSection(deck),
+        chapter: getDeckChapter(deck),
+        name: cleanParts[0] || deck.name,
+        updatedAt: Date.now(),
+      }
+    }
+    return {
+      ...deck,
+      section: cleanParts[0],
+      chapter: cleanParts.length > 2 ? cleanParts.slice(1, -1).join(' / ') : '',
+      name: cleanParts[cleanParts.length - 1] || deck.name,
+      updatedAt: Date.now(),
+    }
+  }
+
+  function moveBrowseScope({ deckIds = [], cardIds = [], sourceParts = [], targetParts = [] } = {}) {
+    const deckIdSet = new Set(deckIds)
+    const cardIdSet = new Set(cardIds)
+    const cleanSource = normalizeDeckPathParts(sourceParts)
+    const cleanTarget = normalizeDeckPathParts(targetParts)
+    if (cleanTarget.length === 0) return
+
+    startTransition(() => {
+      setData((current) => {
+        const nextDecks = current.decks.map((deck) => {
+          if (!deckIdSet.has(deck.id)) return deck
+          const fullParts = getDeckScopeParts(deck)
+          const nextParts = replacePathPrefix(fullParts, cleanSource, cleanTarget)
+          return deckFromFullParts(deck, nextParts)
+        })
+
+        const nextCards = current.cards.map((card) => {
+          if (!cardIdSet.has(card.id) && !deckIdSet.has(card.deckId)) return card
+          const sourcePath = Array.isArray(card?.source?.deckPath)
+            ? card.source.deckPath.map(normalizePathPart).filter(Boolean)
+            : []
+          if (sourcePath.length === 0) return card
+          const nextDeckPath = replacePathPrefix(sourcePath, cleanSource, cleanTarget)
+          return {
+            ...card,
+            source: {
+              ...card.source,
+              deckPath: nextDeckPath,
+              deckName: nextDeckPath.join('::'),
+            },
+            updatedAt: Date.now(),
+          }
+        })
+
+        return { ...current, decks: nextDecks, cards: nextCards }
+      })
+    })
+  }
+
+  function mergeBrowseDecks({ sourceDeckIds = [], targetDeckId = '' } = {}) {
+    const sourceSet = new Set(sourceDeckIds.filter((id) => id && id !== targetDeckId))
+    if (!targetDeckId || sourceSet.size === 0) return
+
+    startTransition(() => {
+      setData((current) => {
+        const targetDeck = current.decks.find((deck) => deck.id === targetDeckId)
+        if (!targetDeck) return current
+        const targetPath = getDeckScopeParts(targetDeck)
+        return {
+          ...current,
+          decks: current.decks.filter((deck) => !sourceSet.has(deck.id)),
+          cards: current.cards.map((card) => {
+            if (!sourceSet.has(card.deckId)) return card
+            return {
+              ...card,
+              deckId: targetDeckId,
+              source: card.source ? {
+                ...card.source,
+                deckPath: targetPath,
+                deckName: targetPath.join('::'),
+              } : card.source,
+              updatedAt: Date.now(),
+            }
+          }),
+        }
+      })
+    })
+  }
+
   function deleteSection(sectionName) {
     startTransition(() => {
       setData((current) => {
@@ -757,6 +870,7 @@ export default function App() {
             ...(cardValue.frontHtml ? { frontHtml: cardValue.frontHtml } : {}),
             ...(cardValue.backHtml ? { backHtml: cardValue.backHtml } : {}),
             ...(cardValue.cardCss ? { cardCss: cardValue.cardCss } : {}),
+            ...(cardValue.cardJs ? { cardJs: cardValue.cardJs } : {}),
             ...(cardValue.htmlSections ? { htmlSections: cardValue.htmlSections } : {}),
             ...(cardValue.sourceKey ? { sourceKey: cardValue.sourceKey } : {}),
             ...(cardValue.source ? { source: cardValue.source } : {}),
@@ -819,6 +933,7 @@ export default function App() {
             ...(card.frontHtml ? { frontHtml: card.frontHtml } : {}),
             ...(card.backHtml ? { backHtml: card.backHtml } : {}),
             ...(card.cardCss ? { cardCss: card.cardCss } : {}),
+            ...(card.cardJs ? { cardJs: card.cardJs } : {}),
             ...(card.htmlSections ? { htmlSections: card.htmlSections } : {}),
             ...(card.sourceKey ? { sourceKey: card.sourceKey } : {}),
             ...(card.source ? { source: card.source } : {}),
@@ -1075,7 +1190,7 @@ export default function App() {
         <Route path="/" element={<Home data={appData} cloud={cloud} />} />
         <Route path="/app" element={<Dashboard data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/decks" element={<Decks data={appData} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteCards={deleteCards} />} />
+        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteCards={deleteCards} onMoveScope={moveBrowseScope} onMergeDecks={mergeBrowseDecks} />} />
         <Route path="/map" element={<KnowledgeMap data={appData} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/organize" element={<Organize data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} studyDeckId={studyDeckId} cloud={cloud} />} />

@@ -58,7 +58,7 @@ import {
   stripSelectionBlockingStylesFromCss,
 } from '../ankiHtml'
 import { parseBulkCards, parseMarkdownCards } from '../cardImport'
-import { getDeckChapter, getDeckOptionLabel, getDeckPath, getDeckSection, normalizePathPart } from '../lib/deckUtils.js'
+import { getDeckChapter, getDeckOptionLabel, getDeckPath, getDeckSection, normalizePathPart, sortDecksByPath } from '../lib/deckUtils.js'
 import {
   buildBrowseScopeTree,
   compactCardText,
@@ -222,10 +222,6 @@ function getSectionNames(decks) {
     ...Array.from(new Set(customSections)),
     UNGROUPED_SECTION,
   ]
-}
-
-function sortDecksByPath(decks) {
-  return [...decks].sort((a, b) => getDeckOptionLabel(a).localeCompare(getDeckOptionLabel(b), 'zh-CN'))
 }
 
 function groupDecksBySection(decks) {
@@ -785,6 +781,8 @@ function BrowseWorktable({
   onOpenEditDeck,
   onDeleteDeck,
   onDeleteCards,
+  onMoveScope,
+  onMergeDecks,
 }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -1006,6 +1004,106 @@ function BrowseWorktable({
     setContextMenu(null)
   }
 
+  function parseScopePathInput(value = '') {
+    return String(value)
+      .split(/[\/／>|]+|\s+\/\s+|\s*>\s+/)
+      .map((part) => normalizePathPart(part))
+      .filter(Boolean)
+  }
+
+  function moveContextScope() {
+    if (!contextScope || contextScope.key === 'all') return
+    if (editableContextDecks.length === 0 && contextScope.cardIds.length === 0) {
+      window.alert('这个目录下没有可移动的本地资料。')
+      return
+    }
+    if (!onMoveScope) {
+      window.alert('当前版本还没有接入目录移动保存函数。')
+      return
+    }
+
+    const currentPath = contextScope.parts.join(' / ')
+    const defaultTarget = contextScope.parts.slice(0, -1).join(' / ')
+    const input = window.prompt(`移动目录：${currentPath}\n\n请输入新的目标路径，例如：刑法 / 正当化事由 / 正当防卫`, defaultTarget || currentPath)
+    const targetParts = parseScopePathInput(input)
+    if (!input || targetParts.length === 0) return
+    if (targetParts.join(' / ') === contextScope.parts.join(' / ')) {
+      setContextMenu(null)
+      return
+    }
+
+    const confirmed = window.confirm(`确定把这个目录移动到：\n${targetParts.join(' / ')}\n\n会同时调整该目录下卡片的 Anki source.deckPath，避免移动后仍显示在旧目录。`)
+    if (!confirmed) return
+
+    onMoveScope({
+      deckIds: editableContextDecks.map((deck) => deck.id),
+      cardIds: contextScope.cardIds,
+      sourceParts: contextScope.parts,
+      targetParts,
+    })
+    setSelectedScopeKey('all')
+    setContextMenu(null)
+  }
+
+  function mergeContextDecks() {
+    if (editableContextDecks.length === 0) return
+    if (!onMergeDecks) {
+      window.alert('当前版本还没有接入目录合并保存函数。')
+      return
+    }
+
+    const sourceIds = new Set(editableContextDecks.map((deck) => deck.id))
+    const candidates = sortDecksByPath(data.decks)
+    const hint = candidates.slice(0, 10).map((deck) => `- ${getDeckOptionLabel(deck)}`).join('\n')
+    const input = window.prompt(`合并目录：${contextScope?.pathLabel ?? ''}\n\n请输入目标卡组名称或路径关键字。匹配到的第一个卡组会作为合并目标。\n\n示例：\n${hint}`, '')
+    if (!input) return
+    const keyword = input.trim().toLowerCase()
+    const targetDeck = candidates.find((deck) => getDeckOptionLabel(deck).toLowerCase().includes(keyword) || String(deck.name ?? '').toLowerCase().includes(keyword))
+    if (!targetDeck) {
+      window.alert('没有找到目标卡组。请复制更完整的目录名称再试。')
+      return
+    }
+
+    const sourceDeckIds = editableContextDecks.map((deck) => deck.id).filter((id) => id !== targetDeck.id)
+    if (sourceDeckIds.length === 0) {
+      window.alert('目标卡组就在当前目录内，没有需要合并的其它本地卡组。')
+      return
+    }
+
+    const confirmed = window.confirm(`确定合并到：\n${getDeckOptionLabel(targetDeck)}\n\n将移动 ${sourceDeckIds.length} 个卡组内的卡片，并删除被合并的空卡组。`)
+    if (!confirmed) return
+    onMergeDecks({ sourceDeckIds, targetDeckId: targetDeck.id })
+    setSelectedScopeKey('all')
+    setContextMenu(null)
+  }
+
+  function exportContextScope() {
+    if (!contextScope) return
+    const cards = contextScope.cardIds.map((id) => browseCardById.get(id)).filter(Boolean)
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      scope: {
+        key: contextScope.key,
+        label: contextScope.label,
+        pathLabel: contextScope.pathLabel,
+        parts: contextScope.parts,
+      },
+      decks: contextDecks,
+      cards,
+    }
+    const fileName = `${String(contextScope.label || 'miki-scope').replace(/[\\/:*?"<>|]/g, '_') || 'miki-scope'}.json`
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    setContextMenu(null)
+  }
+
   function setCardFlagColor(card, color) {
     const nextColor = color || ''
     onUpdateCardMeta?.(card.id, { flagged: Boolean(nextColor), flagColor: nextColor })
@@ -1147,7 +1245,14 @@ ${title}
             <span className="block truncate">{node.label}</span>
           </span>
           <span className="shrink-0 text-[11px] font-bold text-gray-400">{node.count}</span>
-          <MoreVertical size={13} className="shrink-0 text-gray-300 opacity-0 group-hover:opacity-100" />
+          <button
+            type="button"
+            onClick={(event) => openContextMenu(event, { type: 'scope', scopeKey: node.key })}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-gray-300 opacity-0 hover:bg-white hover:text-gray-600 group-hover:opacity-100"
+            title="目录操作"
+          >
+            <MoreVertical size={13} />
+          </button>
         </div>
         {hasChildren && expanded && (
           <div className="mt-0.5">
@@ -1477,6 +1582,15 @@ ${title}
               <button type="button" onClick={() => { if (editableContextDecks[0]) onOpenEditDeck?.(editableContextDecks[0]); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50 disabled:text-gray-300" disabled={editableContextDecks.length !== 1}>
                 <PencilLine size={14} /> 编辑本地目录
               </button>
+              <button type="button" onClick={moveContextScope} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50 disabled:text-gray-300" disabled={!contextScope || contextScope.key === 'all' || (editableContextDecks.length === 0 && contextScope.cardIds.length === 0)}>
+                <GitBranch size={14} /> 移动目录
+              </button>
+              <button type="button" onClick={mergeContextDecks} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50 disabled:text-gray-300" disabled={editableContextDecks.length === 0}>
+                <Layers3 size={14} /> 合并到卡组
+              </button>
+              <button type="button" onClick={exportContextScope} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50 disabled:text-gray-300" disabled={!contextScope || contextScope.count === 0}>
+                <Upload size={14} /> 导出目录数据
+              </button>
               <button type="button" onClick={deleteContextDecks} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-red-600 hover:bg-red-50 disabled:text-gray-300" disabled={editableContextDecks.length === 0}>
                 <Trash2 size={14} /> 删除本地目录
               </button>
@@ -1489,7 +1603,7 @@ ${title}
   )
 }
 
-function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteCards }) {
+function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteCards, onMoveScope, onMergeDecks }) {
   const location = useLocation()
   const navigate = useNavigate()
   const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
@@ -1587,6 +1701,8 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
         onOpenEditDeck={onOpenEditDeck}
         onDeleteDeck={onDeleteDeck}
         onDeleteCards={onDeleteCards}
+        onMoveScope={onMoveScope}
+        onMergeDecks={onMergeDecks}
       />
     )
   }
