@@ -310,8 +310,17 @@ html.dark .anki-card-content th {
 }
 
 @media (min-width: 1280px) {
+  .shell-main[data-shell-width="narrow"] .browse-worktable-grid {
+    grid-template-columns: 280px minmax(560px, 1fr) 360px;
+  }
+
+  .shell-main[data-shell-width="wide"] .browse-worktable-grid,
+  .shell-main[data-shell-width="normal"] .browse-worktable-grid {
+    grid-template-columns: minmax(280px, 0.82fr) minmax(620px, 1.55fr) minmax(420px, 1fr);
+  }
+
   .shell-main[data-shell-width="full"] .browse-worktable-grid {
-    grid-template-columns: 300px minmax(620px, 1fr) 400px;
+    grid-template-columns: minmax(300px, 0.85fr) minmax(720px, 1.65fr) minmax(520px, 1.15fr);
   }
 }
 
@@ -331,5 +340,105 @@ html.dark .anki-card-content th {
   .browse-preview-plain {
     max-width: 100%;
     overflow-wrap: anywhere;
+  }
+}
+
+/* Dark mode polish: keep the same soft glass look instead of harsh black/white blocks. */
+html.dark .bg-white,
+html.dark [class~="bg-white/70"],
+html.dark [class~="bg-white/75"],
+html.dark [class~="bg-white/80"],
+html.dark [class~="bg-white/85"],
+html.dark [class~="bg-white/90"] {
+  background-color: rgb(15 23 42 / 0.86);
+}
+
+html.dark .bg-gray-50,
+html.dark [class~="bg-gray-50/70"],
+html.dark [class~="bg-gray-50/80"],
+html.dark [class~="bg-gray-50/90"],
+html.dark [class~="bg-gray-100"],
+html.dark [class~="bg-gray-200/70"] {
+  background-color: rgb(30 41 59 / 0.72);
+}
+
+html.dark .bg-blue-50,
+html.dark [class~="bg-blue-50/80"] {
+  background-color: rgb(30 64 175 / 0.34);
+}
+
+html.dark .bg-green-50,
+html.dark [class~="bg-green-50/80"],
+html.dark .bg-emerald-50 {
+  background-color: rgb(22 101 52 / 0.32);
+}
+
+html.dark .bg-red-50,
+html.dark [class~="bg-red-50/80"] {
+  background-color: rgb(127 29 29 / 0.32);
+}
+
+html.dark .bg-orange-50,
+html.dark [class~="bg-orange-50/80"],
+html.dark .bg-yellow-50 {
+  background-color: rgb(120 53 15 / 0.34);
+}
+
+html.dark [class~="from-orange-50"][class~="via-white"][class~="to-blue-50"] {
+  background-image: linear-gradient(135deg, rgb(67 20 7 / 0.55), rgb(15 23 42 / 0.9), rgb(30 64 175 / 0.32));
+}
+
+html.dark [class~="from-gray-50"][class~="to-white"] {
+  background-image: linear-gradient(180deg, rgb(30 41 59 / 0.68), rgb(15 23 42 / 0.92));
+}
+
+html.dark [class~="border-white/80"],
+html.dark [class~="border-white/70"],
+html.dark [class~="ring-gray-100/80"],
+html.dark [class~="ring-gray-100"],
+html.dark [class~="ring-white/80"] {
+  border-color: rgb(51 65 85 / 0.85);
+  --tw-ring-color: rgb(51 65 85 / 0.72);
+}
+
+html.dark .metric-tile {
+  box-shadow: 0 16px 38px rgb(0 0 0 / 0.18);
+}
+
+html.dark .browse-preview-panel,
+html.dark .browse-preview-card,
+html.dark .browse-preview-section {
+  background-color: rgb(15 23 42 / 0.9);
+}
+
+html.dark .browse-preview-plain {
+  background-color: rgb(30 41 59 / 0.72);
+  color: #e2e8f0;
+}
+
+html.dark [class~="bg-green-100"] {
+  background-color: rgb(20 184 166 / 0.24);
+}
+
+html.dark [class~="bg-green-300"] {
+  background-color: rgb(45 212 191 / 0.56);
+}
+
+html.dark [class~="bg-green-500"] {
+  background-color: rgb(20 184 166 / 0.86);
+}
+
+@media (min-width: 1280px) {
+  .shell-main[data-shell-width="narrow"] .browse-worktable-grid {
+    grid-template-columns: 280px minmax(520px, 1fr) minmax(320px, 0.85fr);
+  }
+
+  .shell-main[data-shell-width="wide"] .browse-worktable-grid,
+  .shell-main[data-shell-width="normal"] .browse-worktable-grid {
+    grid-template-columns: minmax(280px, 0.78fr) minmax(620px, 1.45fr) minmax(380px, 0.95fr);
+  }
+
+  .shell-main[data-shell-width="full"] .browse-worktable-grid {
+    grid-template-columns: minmax(300px, 0.82fr) minmax(720px, 1.55fr) minmax(460px, 1.05fr);
   }
 }

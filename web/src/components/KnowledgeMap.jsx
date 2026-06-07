@@ -6,8 +6,11 @@ import { compactCardText, getCardReviewStateLabel, isCardDue, isNewCard } from '
 import { getDeckChapter, getDeckOptionLabel, getDeckPath, getDeckSection } from '../lib/deckUtils.js'
 
 const TOPIC_STORAGE_KEY = 'miki:knowledge-filter-topics:v1'
-const RESULT_RENDER_LIMIT = 50
-const ELEMENT_GROUP_RENDER_LIMIT = 18
+const INITIAL_RESULT_RENDER_LIMIT = 60
+const RESULT_RENDER_STEP = 60
+const INITIAL_ELEMENT_RENDER_LIMIT = 32
+const ELEMENT_RENDER_STEP = 32
+const AUTO_RENDER_DELAY = 45
 
 const CONDITION_MODES = [
   { value: 'and', label: 'AND', tone: 'bg-blue-50 text-blue-700 border-blue-200', hint: '必须包含' },
@@ -47,6 +50,12 @@ const GROUP_META = {
   cover: { title: '遮盖词元素', subtitle: '优先提取 ak-cover / cloze', accent: 'bg-emerald-50 text-emerald-700' },
   structure: { title: '结构类型', subtitle: '按法硕答题结构自动判断', accent: 'bg-orange-50 text-orange-700' },
   review: { title: '复习状态', subtitle: '按当前复习状态筛选', accent: 'bg-red-50 text-red-700' },
+}
+
+const GROUP_KEYS = Object.keys(GROUP_META)
+
+function makeElementRenderLimits(value = INITIAL_ELEMENT_RENDER_LIMIT) {
+  return GROUP_KEYS.reduce((limits, group) => ({ ...limits, [group]: value }), {})
 }
 
 const NORMALIZED_LEGAL_TOPIC_TERMS = LEGAL_TOPIC_TERMS.map((label) => ({ label, key: normalizeText(label) }))
@@ -127,7 +136,7 @@ function extractCoverTerms(rawHtml = '') {
       if (text && text.length <= 48) terms.push(text)
     }
   }
-  return uniqueStrings(terms).slice(0, 40)
+  return uniqueStrings(terms).slice(0, 80)
 }
 
 function inferDeckPathParts(card, deck) {
@@ -222,7 +231,7 @@ function enrichCards(data) {
       title.replace(/^\d+[.、．]\s*/, ''),
       ...NORMALIZED_LEGAL_TOPIC_TERMS.filter((term) => term.key && blobKey.includes(term.key)).map((term) => term.label),
       ...coverTerms,
-    ]).filter((term) => term.length >= 2).slice(0, 18)
+    ]).filter((term) => term.length >= 2).slice(0, 48)
 
     const searchableText = uniqueStrings([
       title,
@@ -436,6 +445,8 @@ function KnowledgeMap({ data, studyDeckId, cloud }) {
   const [resultView, setResultView] = useState('list')
   const [openElementMenuId, setOpenElementMenuId] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState(() => ({ topic: true, cover: true, structure: true, review: true }))
+  const [elementRenderLimits, setElementRenderLimits] = useState(() => makeElementRenderLimits())
+  const [cardRenderLimit, setCardRenderLimit] = useState(INITIAL_RESULT_RENDER_LIMIT)
 
   useEffect(() => {
     try {
@@ -456,22 +467,58 @@ function KnowledgeMap({ data, studyDeckId, cloud }) {
     if (!keyword) return elements
     return elements.filter((element) => (element.searchText || normalizeText(`${element.label} ${element.terms.join(' ')}`)).includes(keyword))
   }, [elements, query])
-  const groupedElements = useMemo(() => {
-    const grouped = { chapter: [], topic: [], cover: [], structure: [], review: [] }
-    for (const element of filteredElements) {
-      if (!grouped[element.group]) grouped[element.group] = []
-      if (grouped[element.group].length < ELEMENT_GROUP_RENDER_LIMIT) grouped[element.group].push(element)
-    }
-    return grouped
-  }, [filteredElements])
   const groupTotals = useMemo(() => {
-    const totals = { chapter: 0, topic: 0, cover: 0, structure: 0, review: 0 }
+    const totals = makeElementRenderLimits(0)
     for (const element of filteredElements) totals[element.group] = (totals[element.group] ?? 0) + 1
     return totals
   }, [filteredElements])
 
+  useEffect(() => {
+    setElementRenderLimits(makeElementRenderLimits())
+  }, [query, elements.length])
+
+  useEffect(() => {
+    const hasMore = GROUP_KEYS.some((group) => (elementRenderLimits[group] ?? 0) < (groupTotals[group] ?? 0))
+    if (!hasMore) return undefined
+    const timer = window.setTimeout(() => {
+      setElementRenderLimits((current) => {
+        const next = { ...current }
+        for (const group of GROUP_KEYS) {
+          const total = groupTotals[group] ?? 0
+          if ((next[group] ?? 0) < total) next[group] = Math.min(total, (next[group] ?? 0) + ELEMENT_RENDER_STEP)
+        }
+        return next
+      })
+    }, AUTO_RENDER_DELAY)
+    return () => window.clearTimeout(timer)
+  }, [elementRenderLimits, groupTotals])
+
+  const groupedElements = useMemo(() => {
+    const grouped = makeElementRenderLimits(0)
+    for (const group of GROUP_KEYS) grouped[group] = []
+    for (const element of filteredElements) {
+      if (!grouped[element.group]) grouped[element.group] = []
+      const limit = elementRenderLimits[element.group] ?? INITIAL_ELEMENT_RENDER_LIMIT
+      if (grouped[element.group].length < limit) grouped[element.group].push(element)
+    }
+    return grouped
+  }, [filteredElements, elementRenderLimits])
+
   const matchedCards = useMemo(() => filterCards(enrichedCards, conditions), [enrichedCards, conditions])
-  const visibleCards = useMemo(() => matchedCards.slice(0, RESULT_RENDER_LIMIT), [matchedCards])
+
+  useEffect(() => {
+    setCardRenderLimit(INITIAL_RESULT_RENDER_LIMIT)
+  }, [conditions, enrichedCards.length])
+
+  useEffect(() => {
+    if (cardRenderLimit >= matchedCards.length) return undefined
+    const timer = window.setTimeout(() => {
+      setCardRenderLimit((current) => Math.min(matchedCards.length, current + RESULT_RENDER_STEP))
+    }, AUTO_RENDER_DELAY)
+    return () => window.clearTimeout(timer)
+  }, [cardRenderLimit, matchedCards.length])
+
+  const visibleCards = useMemo(() => matchedCards.slice(0, cardRenderLimit), [matchedCards, cardRenderLimit])
   const summaryTerms = useMemo(() => topTerms(matchedCards), [matchedCards])
   const chapterSummary = useMemo(() => topChapter(matchedCards), [matchedCards])
   const dueCount = useMemo(() => countBy(matchedCards, (item) => item.review.due), [matchedCards])
@@ -690,7 +737,7 @@ function KnowledgeMap({ data, studyDeckId, cloud }) {
                         />
                       ))}
                       {(groupedElements[group] ?? []).length === 0 && <p className="rounded-xl bg-white px-3 py-5 text-center text-xs font-bold text-gray-400">暂无匹配元素</p>}
-                      {total > shown && <p className="px-2 py-1 text-center text-[10px] font-bold text-gray-400">已显示前 {shown} 个，继续搜索可缩小范围</p>}
+                      {total > shown && <p className="px-2 py-1 text-center text-[10px] font-bold text-gray-400">正在分批加载 {shown}/{total} 个元素…</p>}
                     </div>
                   )}
                 </section>
@@ -766,7 +813,7 @@ function KnowledgeMap({ data, studyDeckId, cloud }) {
               })}
             </div>
 
-            {matchedCards.length > RESULT_RENDER_LIMIT && <p className="py-4 text-center text-xs font-bold text-gray-400">已显示前 {RESULT_RENDER_LIMIT} 张，可继续增加条件缩小范围。</p>}
+            {matchedCards.length > visibleCards.length && <p className="py-4 text-center text-xs font-bold text-gray-400">正在分批加载 {visibleCards.length}/{matchedCards.length} 张卡，不会一次性塞满页面。</p>}
             {conditions.length > 0 && matchedCards.length === 0 && <p className="py-16 text-center text-sm font-bold text-gray-400">没有卡片同时符合这些条件，试着把部分 AND 切成 OR。</p>}
             {conditions.length === 0 && <p className="py-16 text-center text-sm font-bold text-gray-400">还没有专题条件，点击左侧元素后这里会实时显示筛选结果。</p>}
           </div>

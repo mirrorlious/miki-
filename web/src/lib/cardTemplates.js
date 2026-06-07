@@ -399,6 +399,41 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
       .trim();
   }
 
+  function splitCombinedQuestion(rawQuestion, rawBack) {
+    rawQuestion = String(rawQuestion || "");
+    rawBack = String(rawBack || "");
+
+    if (cleanText(rawBack)) {
+      return {
+        front: rawQuestion,
+        back: rawBack
+      };
+    }
+
+    var tabIndex = rawQuestion.indexOf("\t");
+
+    if (tabIndex !== -1) {
+      return {
+        front: rawQuestion.slice(0, tabIndex),
+        back: rawQuestion.slice(tabIndex + 1)
+      };
+    }
+
+    var answerIndex = rawQuestion.search(/(?:答案|正确答案)\s*[:：]\s*[A-D]{1,4}/i);
+
+    if (answerIndex !== -1) {
+      return {
+        front: rawQuestion.slice(0, answerIndex),
+        back: rawQuestion.slice(answerIndex)
+      };
+    }
+
+    return {
+      front: rawQuestion,
+      back: rawBack
+    };
+  }
+
   function normalizeAnswer(ans) {
     var s = String(ans || "").toUpperCase();
     var arr = [];
@@ -484,12 +519,12 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
       data.answer = normalizeAnswer(answerMatch[1]);
     }
 
-    var tagMatch = raw.match(/标签\s*[:：]\s*([\s\S]*?)(?=解析\s*[:：]|$)/);
+    var tagMatch = raw.match(/(?:标签|考点)\s*[:：]\s*([\s\S]*?)(?=(?:解析|分析|详解|说明)\s*[:：]|$)/);
     if (tagMatch) {
       data.tag = tagMatch[1].trim();
     }
 
-    var analysisMatch = raw.match(/解析\s*[:：]\s*([\s\S]*)/);
+    var analysisMatch = raw.match(/(?:解析|分析|详解|说明)\s*[:：]\s*([\s\S]*)/);
     if (analysisMatch) {
       data.analysis = analysisMatch[1].trim();
     }
@@ -828,8 +863,12 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     var side = sideEl.getAttribute("data-side") || "front";
     var settings = readSettings();
 
-    var q = parseQuestion(getText("raw-question"));
-    var b = parseBack(getText("raw-back"));
+    var rawQuestion = getText("raw-question");
+    var rawBack = getText("raw-back");
+    var combined = splitCombinedQuestion(rawQuestion, rawBack);
+
+    var q = parseQuestion(combined.front);
+    var b = parseBack(combined.back);
 
     var answer = normalizeAnswer(b.answer);
     b.answer = answer;

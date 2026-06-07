@@ -8,7 +8,18 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
   const templates = useMemo(() => getCardTemplates(data), [data])
   const [activeTemplateId, setActiveTemplateId] = useState(selectedTemplateId || 'qa')
   const [activeTab, setActiveTab] = useState('frontCode')
+  const [templateQuery, setTemplateQuery] = useState('')
+  const [templateFilter, setTemplateFilter] = useState('all')
   const activeTemplate = templates.find((template) => template.id === activeTemplateId) ?? templates[0]
+  const filteredTemplates = useMemo(() => {
+    const keyword = templateQuery.trim().toLowerCase()
+    return templates.filter((template) => {
+      if (templateFilter === 'system' && !template.builtIn) return false
+      if (templateFilter === 'custom' && template.builtIn) return false
+      if (!keyword) return true
+      return `${template.name} ${template.description}`.toLowerCase().includes(keyword)
+    })
+  }, [templateFilter, templateQuery, templates])
   const [draft, setDraft] = useState(() => normalizeCardTemplate(activeTemplate))
 
   useEffect(() => {
@@ -32,8 +43,9 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
     }, previewTemplate),
   }
   const tabOptions = [
-    { key: 'frontCode', label: '正面' },
-    { key: 'backCode', label: '背面' },
+    { key: 'fields', label: '字段' },
+    { key: 'frontCode', label: '问题(正面)代码' },
+    { key: 'backCode', label: '答案(反面)代码' },
     { key: 'css', label: 'CSS' },
     { key: 'js', label: 'JavaScript' },
   ]
@@ -93,13 +105,15 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
             </button>
           </div>
           <div className="mb-3 flex gap-2">
-            <select className="h-9 w-24 rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-500">
-              <option>全部</option>
+            <select value={templateFilter} onChange={(event) => setTemplateFilter(event.target.value)} className="h-9 w-24 rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-500 outline-none focus:border-[#007aff]">
+              <option value="all">全部</option>
+              <option value="system">系统</option>
+              <option value="custom">自定义</option>
             </select>
-            <input className="h-9 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-[#007aff]" placeholder="关键词搜索模板" />
+            <input value={templateQuery} onChange={(event) => setTemplateQuery(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-xs outline-none focus:border-[#007aff]" placeholder="关键词搜索模板" />
           </div>
           <div className="flex max-h-[calc(100vh-150px)] flex-col gap-2 overflow-auto">
-            {templates.map((template) => (
+            {filteredTemplates.map((template) => (
               <button
                 key={template.id}
                 type="button"
@@ -110,6 +124,9 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
                 <span className="mt-1 line-clamp-2 block text-xs leading-5 text-gray-400">{template.description || 'Front、Back、样式。'}</span>
               </button>
             ))}
+            {filteredTemplates.length === 0 && (
+              <p className="rounded-lg border border-dashed border-gray-200 bg-white/70 px-3 py-8 text-center text-xs font-bold text-gray-400">没有匹配的模板。</p>
+            )}
           </div>
         </aside>
 
@@ -143,12 +160,36 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
             ))}
           </div>
 
-          <textarea
-            value={draft[activeTab] ?? ''}
-            onChange={(event) => updateDraft(activeTab, event.target.value)}
-            spellCheck={false}
-            className="min-h-0 flex-1 resize-none bg-white px-5 py-4 font-mono text-xs leading-6 text-gray-800 outline-none"
-          />
+          {activeTab === 'fields' ? (
+            <div className="min-h-0 flex-1 overflow-auto bg-white px-6 py-5 text-sm text-gray-700">
+              <h3 className="text-base font-black text-gray-950">可用字段</h3>
+              <p className="mt-1 text-xs font-bold text-gray-400">模板代码里可以直接写这些占位符，导入时会自动替换。</p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {[
+                  ['{{正面}} / {{Front}}', '题干、问题、正文内容'],
+                  ['{{反面}} / {{Back}}', '答案、解析、考点、备注'],
+                  ['{{内容}}', '通用内容字段，适合单面卡'],
+                  ['{{FrontSide}}', '背面引用正面模板，Anki 风格'],
+                ].map(([field, desc]) => (
+                  <div key={field} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <code className="font-mono text-sm font-black text-blue-600">{field}</code>
+                    <p className="mt-1 text-xs font-bold text-gray-400">{desc}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <p className="text-xs font-black text-blue-700">选择题导入提示</p>
+                <p className="mt-2 text-xs font-bold leading-6 text-blue-700">如果 TXT 没有被正确拆成正面/反面，选择题模板会兜底从正面里识别 Tab、答案：A、正确答案：AB、考点：、解析：等内容。</p>
+              </div>
+            </div>
+          ) : (
+            <textarea
+              value={draft[activeTab] ?? ''}
+              onChange={(event) => updateDraft(activeTab, event.target.value)}
+              spellCheck={false}
+              className="min-h-0 flex-1 resize-none bg-white px-5 py-4 font-mono text-xs leading-6 text-gray-800 outline-none"
+            />
+          )}
         </main>
 
         <aside className="border-l border-gray-100 bg-white p-4">

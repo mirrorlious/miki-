@@ -1283,7 +1283,7 @@ ${title}
         </div>
       </header>
 
-      <div className="browse-worktable-grid grid min-h-[720px] w-full grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(620px,1fr)_400px]">
+      <div className="browse-worktable-grid grid min-h-[720px] w-full grid-cols-1 items-start gap-4 xl:grid-cols-[300px_minmax(620px,1fr)_400px]">
         <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
           <div className="flex h-12 items-center justify-between border-b border-gray-200 px-4">
             <div>
@@ -1451,7 +1451,7 @@ ${title}
           </section>
         </main>
 
-        <aside className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
+        <aside className="browse-preview-panel self-start overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
           {selectedCard ? (
             <div className="browse-preview-card max-h-[calc(100vh-150px)] overflow-auto p-4">
               <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center justify-between gap-2 bg-white/90 pb-2 backdrop-blur">
@@ -1538,7 +1538,12 @@ ${title}
               )}
             </div>
           ) : (
-            <p className="py-10 text-center text-sm text-gray-400">选择一张卡片查看预览。</p>
+            <div className="grid min-h-[220px] place-items-center p-6 text-center">
+              <div className="rounded-2xl bg-gray-50/70 px-5 py-8 ring-1 ring-gray-100">
+                <p className="text-sm font-black text-gray-400">选择一张卡片查看预览。</p>
+                <p className="mt-2 text-xs font-bold leading-5 text-gray-300">预览区现在不再强行撑满整屏，选中卡片后会展开为阅读面板。</p>
+              </div>
+            </div>
           )}
         </aside>
       </div>

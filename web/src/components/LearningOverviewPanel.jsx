@@ -1,21 +1,43 @@
-import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, CalendarDays, Layers3, Target } from 'lucide-react'
 import { stats } from '../data.js'
 import { getStoredProfile } from '../lib/profile.js'
-import { getCalendarActivityMap, getMonthCalendarDays, getDateStudyDetails, getTodaySiteSeconds, getActivity, getFocusSummary, formatDuration } from '../lib/activity.js'
+import {
+  formatDuration,
+  getActivity,
+  getCalendarActivityMap,
+  getDateStudyDetails,
+  getFocusSummary,
+  getMonthCalendarDays,
+  getTodaySiteSeconds,
+} from '../lib/activity.js'
 import { getCountdownInfo, getDateLabel } from '../lib/dateUtils.js'
 
 function LearningOverviewPanel({ data }) {
+  const safeData = useMemo(() => ({
+    ...(data || {}),
+    cards: Array.isArray(data?.cards) ? data.cards : [],
+    decks: Array.isArray(data?.decks) ? data.decks : [],
+    reviewLogs: Array.isArray(data?.reviewLogs) ? data.reviewLogs : [],
+  }), [data])
+
   const [now, setNow] = useState(() => Date.now())
   const [selectedDateKey, setSelectedDateKey] = useState(null)
   const [focusRange, setFocusRange] = useState('week')
-  const activity = getActivity(data)
-  const storedTodaySeconds = getTodaySiteSeconds(data)
-  const liveBaseRef = useRef({ todaySeconds: storedTodaySeconds, siteSeconds: activity.siteSeconds, startedAt: now })
+  const activity = getActivity(safeData)
+  const storedTodaySeconds = getTodaySiteSeconds(safeData)
+  const liveBaseRef = useRef({
+    todaySeconds: storedTodaySeconds,
+    siteSeconds: activity.siteSeconds,
+    startedAt: now,
+  })
 
   useEffect(() => {
-    liveBaseRef.current = { todaySeconds: storedTodaySeconds, siteSeconds: activity.siteSeconds, startedAt: Date.now() }
+    liveBaseRef.current = {
+      todaySeconds: storedTodaySeconds,
+      siteSeconds: activity.siteSeconds,
+      startedAt: Date.now(),
+    }
   }, [activity.siteSeconds, storedTodaySeconds])
 
   useEffect(() => {
@@ -27,20 +49,28 @@ function LearningOverviewPanel({ data }) {
   const liveElapsed = Math.floor((now - liveBaseRef.current.startedAt) / 1000)
   const liveTodaySeconds = liveBaseRef.current.todaySeconds + liveElapsed
   const calendarDays = getMonthCalendarDays(currentDate)
-  const activityMap = getCalendarActivityMap(data)
-  const summary = stats(data)
-  const profile = getStoredProfile(data)
-  const goalSeconds = profile.dailyGoalMinutes * 60
-  const selectedDetails = selectedDateKey ? getDateStudyDetails(data, selectedDateKey) : null
-  const selectedActivity = selectedDateKey ? (activityMap.get(selectedDateKey) ?? { cards: 0, reviews: 0, logs: 0 }) : { cards: 0, reviews: 0, logs: 0 }
-  const deckById = new Map(data.decks.map((deck) => [deck.id, deck]))
-  const countdownInfo = getCountdownInfo(data, now)
-  const focusSummary = getFocusSummary(data, focusRange, currentDate)
+  const activityMap = getCalendarActivityMap(safeData)
+  const summary = stats(safeData)
+  const profile = getStoredProfile(safeData)
+  const dailyGoalMinutes = Number(profile?.dailyGoalMinutes ?? 30)
+  const goalSeconds = Math.max(1, dailyGoalMinutes * 60)
+  const selectedDetails = selectedDateKey
+    ? (getDateStudyDetails(safeData, selectedDateKey) ?? { cards: [], reviews: [], dailyLog: null })
+    : null
+  const selectedCards = Array.isArray(selectedDetails?.cards) ? selectedDetails.cards : []
+  const selectedReviews = Array.isArray(selectedDetails?.reviews) ? selectedDetails.reviews : []
+  const selectedActivity = selectedDateKey
+    ? (activityMap.get(selectedDateKey) ?? { cards: 0, reviews: 0, logs: 0 })
+    : { cards: 0, reviews: 0, logs: 0 }
+  const deckById = new Map(safeData.decks.map((deck) => [deck.id, deck]))
+  const countdownInfo = getCountdownInfo(safeData, now)
+  const focusSummary = getFocusSummary(safeData, focusRange, currentDate)
   const monthLabel = currentDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })
   const todayLabel = currentDate.toLocaleDateString('zh-CN', { weekday: 'short', month: '2-digit', day: '2-digit' })
+  const goalPercent = Math.round(Math.min(100, (liveTodaySeconds / goalSeconds) * 100))
 
   return (
-    <section className="mb-5 overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
+    <section className="overflow-hidden rounded-2xl border border-white bg-white/90 shadow-sm">
       <div className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
         <div className="border-b border-gray-100 p-5 lg:border-b-0 lg:border-r">
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -50,9 +80,11 @@ function LearningOverviewPanel({ data }) {
             </div>
             <CalendarDays size={20} className="text-[#007aff]" />
           </div>
+
           <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-black text-gray-300">
             {['一', '二', '三', '四', '五', '六', '日'].map((day) => <span key={day}>{day}</span>)}
           </div>
+
           <div className="mt-2 grid grid-cols-7 gap-1">
             {calendarDays.map((day) => {
               const dayActivity = activityMap.get(day.key)
@@ -64,7 +96,15 @@ function LearningOverviewPanel({ data }) {
                   type="button"
                   onClick={() => setSelectedDateKey((current) => (current === day.key ? null : day.key))}
                   title={`${getDateLabel(day.key)}：新增 ${dayActivity?.cards ?? 0}，复习 ${dayActivity?.reviews ?? 0}`}
-                  className={`relative grid h-8 place-items-center rounded-lg text-xs font-black transition-colors ${selected ? 'bg-gray-950 text-white' : day.isToday ? 'bg-[#007aff] text-white' : day.inMonth ? 'bg-gray-50 text-gray-700 hover:bg-gray-100' : 'text-gray-300 hover:bg-gray-50'}`}
+                  className={`relative grid h-8 place-items-center rounded-lg text-xs font-black transition-colors ${
+                    selected
+                      ? 'bg-gray-950 text-white'
+                      : day.isToday
+                        ? 'bg-[#007aff] text-white'
+                        : day.inMonth
+                          ? 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                          : 'text-gray-300 hover:bg-gray-50'
+                  }`}
                 >
                   {day.date.getDate()}
                   {active && <span className={`absolute bottom-1 h-1 w-1 rounded-full ${selected || day.isToday ? 'bg-white' : 'bg-[#34c759]'}`} />}
@@ -72,6 +112,7 @@ function LearningOverviewPanel({ data }) {
               )
             })}
           </div>
+
           <p className="mt-3 text-[11px] font-bold text-gray-300">点击日期展开当天记录，再点一次收起。</p>
         </div>
 
@@ -95,7 +136,7 @@ function LearningOverviewPanel({ data }) {
                 <Target size={16} className="text-gray-300" />
               </div>
               <p className="text-2xl font-black text-gray-950">{formatDuration(liveTodaySeconds, true)}</p>
-              <p className="mt-1 text-[11px] font-bold text-gray-400">目标 {Math.round(Math.min(100, (liveTodaySeconds / Math.max(goalSeconds, 1)) * 100))}%</p>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">目标 {goalPercent}%</p>
             </div>
 
             <div className="rounded-xl bg-gray-50 px-4 py-4">
@@ -127,7 +168,7 @@ function LearningOverviewPanel({ data }) {
                 <BookOpen size={16} className="text-gray-300" />
               </div>
               <p className="text-2xl font-black text-gray-950">{summary.mastered}</p>
-              <p className="mt-1 text-[11px] font-bold text-gray-400">{summary.learned}/{data.cards.length} 已学</p>
+              <p className="mt-1 text-[11px] font-bold text-gray-400">{summary.learned}/{safeData.cards.length} 已学</p>
             </div>
 
             <div className="rounded-xl bg-gray-50 px-4 py-4">
@@ -143,11 +184,7 @@ function LearningOverviewPanel({ data }) {
       </div>
 
       {selectedDateKey && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          className="border-t border-gray-100 bg-white"
-        >
+        <div className="border-t border-gray-100 bg-white">
           <div className="grid grid-cols-1 gap-4 p-5 lg:grid-cols-[220px_minmax(0,1fr)]">
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-300">Selected Day</p>
@@ -163,10 +200,10 @@ function LearningOverviewPanel({ data }) {
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {selectedDetails.cards.length === 0 && !selectedDetails.dailyLog?.content?.trim() && selectedDetails.reviews.length === 0 && (
+              {selectedCards.length === 0 && !selectedDetails?.dailyLog?.content?.trim() && selectedReviews.length === 0 && (
                 <p className="rounded-xl bg-gray-50 px-4 py-8 text-center text-sm font-bold text-gray-400 md:col-span-2">这天还没有学习记录。</p>
               )}
-              {selectedDetails.cards.slice(0, 6).map((card) => {
+              {selectedCards.slice(0, 6).map((card) => {
                 const deck = deckById.get(card.deckId)
                 return (
                   <div key={card.id} className="rounded-xl bg-gray-50 px-4 py-3">
@@ -175,7 +212,7 @@ function LearningOverviewPanel({ data }) {
                   </div>
                 )
               })}
-              {selectedDetails.dailyLog?.content?.trim() && (
+              {selectedDetails?.dailyLog?.content?.trim() && (
                 <div className="rounded-xl bg-gray-50 px-4 py-3 md:col-span-2">
                   <p className="text-sm font-black text-gray-800">今日复盘</p>
                   <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-gray-500">{selectedDetails.dailyLog.content}</p>
@@ -183,12 +220,10 @@ function LearningOverviewPanel({ data }) {
               )}
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
     </section>
   )
 }
-
-
 
 export default LearningOverviewPanel

@@ -91,8 +91,8 @@ function applyCardTemplateCode(code = '', fields = {}) {
     Back: makeTemplateFieldHtml(fields.back),
   }
   return String(code || '')
-    .replace(/{{\s*(?:Front|问题|正面)\s*}}/gi, fieldHtml.Front)
-    .replace(/{{\s*(?:Back|答案|背面)\s*}}/gi, fieldHtml.Back)
+    .replace(/{{\s*(?:Front|front|问题|题目|正面)\s*}}/gi, fieldHtml.Front)
+    .replace(/{{\s*(?:Back|back|答案|解析|背面|反面)\s*}}/gi, fieldHtml.Back)
 }
 
 function buildCardValueFromTemplate(form, template) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BookOpen, ChevronDown, ExternalLink, FileText, Upload, FolderOpen, Sparkles, Check, X, Loader, Wand2 } from 'lucide-react'
+import { BookOpen, ChevronDown, ExternalLink, FileText, Upload, FolderOpen, Sparkles, Check, X, Loader, Wand2, PencilLine } from 'lucide-react'
 import { parseApkgFile } from '../apkgImport.js'
 import { parseBulkCards, parseMarkdownCards } from '../cardImport.js'
 import { buildCardValueFromTemplate } from '../lib/cardHtml.js'
@@ -10,13 +10,15 @@ import Shell from './Shell.jsx'
 import ToolbarButton from './ToolbarButton.jsx'
 import CardContent from './CardContent.jsx'
 import DeckSelectOptions from './DeckSelectOptions.jsx'
+import TemplateManager from './TemplateManager.jsx'
 
-function ImportCards({ data, onCreateCards, studyDeckId, cloud }) {
+function ImportCards({ data, onCreateCards, onSaveCardTemplate, onDeleteCardTemplate, studyDeckId, cloud }) {
   const navigate = useNavigate()
   const [selectedDeckId, setSelectedDeckId] = useState(data.decks[0]?.id ?? '')
   const [importMode, setImportMode] = useState('qa')
   const [selectedTemplateId, setSelectedTemplateId] = useState('qa')
   const [templateMode, setTemplateMode] = useState('plain')
+  const [templateManagerOpen, setTemplateManagerOpen] = useState(false)
   const [rawText, setRawText] = useState('')
   const [apkgImport, setApkgImport] = useState(null)
   const [isParsingFile, setIsParsingFile] = useState(false)
@@ -238,6 +240,14 @@ D. 防卫行为没有限度要求
                 >
                   {visibleTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => setTemplateManagerOpen(true)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-50 px-3 text-xs font-black text-blue-600 hover:bg-blue-100"
+                  title="打开模板编辑窗口"
+                >
+                  <PencilLine size={13} /> 编辑模板
+                </button>
               </div>
             )}
 
@@ -417,6 +427,22 @@ ${sampleText}`}</pre>
           </section>
         </aside>
       </div>
+
+      <TemplateManager
+        open={templateManagerOpen}
+        data={data}
+        selectedTemplateId={selectedTemplate?.id ?? selectedTemplateId}
+        onSelectTemplate={(templateId) => {
+          const nextTemplate = cardTemplates.find((template) => template.id === templateId)
+          if (nextTemplate?.mode === 'html') setTemplateMode('html')
+          else setTemplateMode('plain')
+          setSelectedTemplateId(templateId)
+          setTemplateManagerOpen(false)
+        }}
+        onSaveTemplate={onSaveCardTemplate}
+        onDeleteTemplate={onDeleteCardTemplate}
+        onClose={() => setTemplateManagerOpen(false)}
+      />
     </Shell>
   )
 }
