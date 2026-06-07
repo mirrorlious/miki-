@@ -6,6 +6,7 @@ import CollapseToggle from './components/CollapseToggle.jsx'
 import CardContent from './components/CardContent.jsx'
 import AuthDialog from './components/AuthDialog.jsx'
 import Shell from './components/Shell.jsx'
+import StudyCardView from './components/StudyCardView.jsx'
 import { motion } from 'framer-motion'
 import DOMPurify from 'dompurify'
 import {
@@ -494,86 +495,22 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
           </div>
         )}
         {activeCard && (
-          <motion.div key={activeCard.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl bg-white/90 border border-white shadow-sm mb-4 min-h-[460px] flex flex-col overflow-hidden ${activeCardHasHtml ? 'text-left' : 'text-center'}`}>
-            <div className="h-10 border-b border-gray-200 px-4 flex items-center justify-between gap-3 text-xs text-gray-400">
-              <span className="flex items-center gap-2">
-                {activeIsDrill ? 'Drill' : 'Front'}
-                {activeCardHasHtml && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-600">HTML</span>}
-              </span>
-              <span className="truncate text-right">{activeCardDeckLabel} · {activeCardStateLabel}</span>
-            </div>
-
-            <div className={`flex-1 flex flex-col ${activeCardHasHtml ? 'justify-start p-4 sm:p-6' : 'justify-center p-10'}`}>
-              <div className={`mb-5 flex flex-wrap items-center gap-2 text-xs font-black ${activeCardHasHtml ? 'justify-start' : 'justify-center'}`}>
-                {activeCard.favorite && <span className="rounded-lg bg-yellow-50 px-2 py-1 text-yellow-700">收藏</span>}
-                {activeCard.flagged && <span className="rounded-lg bg-red-50 px-2 py-1 text-red-600">重点</span>}
-                {lastGrade && <span className={`rounded-lg px-2 py-1 ${lastGrade.badgeClass}`}>上次 {lastGrade.title}</span>}
-                {activeCard.tags?.slice(0, 3).map((tag) => (
-                  <span key={tag} className="rounded-lg bg-gray-100 px-2 py-1 text-gray-500">{tag}</span>
-                ))}
-              </div>
-              {activeCardHasHtml && (
-                <div className="mb-6 flex max-w-full flex-wrap justify-start gap-1 self-stretch rounded-xl bg-gray-100 p-1 text-xs font-black">
-                  {studyHtmlTabs.map((section) => (
-                    <button
-                      key={section.key}
-                      type="button"
-                      onClick={() => selectStudyHtmlSection(section.key)}
-                      className={`h-8 rounded-lg px-3 ${studyHtmlSection === section.key ? 'bg-white text-[#007aff] shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
-                    >
-                      {section.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {activeCardHasHtml && studyHtmlSection === 'note' ? (
-                studyNotePanel
-              ) : activeCardHasHtml && activeHtmlSection && revealed ? (
-                <div className="mx-auto w-full max-w-full">
-                  <p className="text-xs font-bold text-gray-400 mb-4">{activeHtmlSection.label}</p>
-                  <CardContent
-                    card={activeCard}
-                    side="back"
-                    htmlOverride={activeHtmlSection.html}
-                    textOverride={activeHtmlSection.text}
-                    className="mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words"
-                    fallbackClassName="mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words whitespace-pre-wrap"
-                  />
-                </div>
-              ) : (
-                <>
-                  {(!activeCardHasHtml || studyHtmlSection === 'front' || !revealed) && (
-                    <CardContent
-                      card={activeCard}
-                      side="front"
-                      className={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-900 leading-relaxed break-words' : 'mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words'}
-                      fallbackClassName={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-900 leading-relaxed break-words whitespace-pre-wrap' : 'mx-auto max-w-full text-3xl font-black text-gray-950 leading-relaxed break-words whitespace-pre-wrap'}
-                    />
-                  )}
-
-                  {!revealed ? (
-                    <button type="button" onClick={revealAnswer} title="显示答案" className="mt-12 mx-auto h-11 w-[170px] rounded-xl bg-[#ff9f0a] text-white text-sm font-bold hover:bg-[#f59600]">显示答案</button>
-                  ) : (
-                    (!activeCardHasHtml || studyHtmlSection === 'back') && (
-                      <div className={activeCardHasHtml ? '' : 'mt-10 pt-8 border-t border-gray-200'}>
-                        <p className="text-xs font-bold text-gray-400 mb-4">Back</p>
-                        <CardContent
-                          card={activeCard}
-                          side="back"
-                          className={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words' : 'mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words'}
-                          fallbackClassName={activeCardHasHtml ? 'mx-auto w-full max-w-full text-left text-base font-normal text-gray-800 leading-relaxed break-words whitespace-pre-wrap' : 'mx-auto max-w-full text-xl text-gray-800 leading-relaxed break-words whitespace-pre-wrap'}
-                        />
-                        {!activeCardHasHtml && activeCard.comment && <p className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-left text-sm leading-relaxed text-gray-500">{activeCard.comment}</p>}
-                      </div>
-                    )
-                  )}
-                </>
-              )}
-            </div>
-          </motion.div>
+          <StudyCardView
+            card={activeCard}
+            hasHtml={activeCardHasHtml}
+            section={studyHtmlSection}
+            revealed={revealed}
+            tabs={studyHtmlTabs}
+            htmlSection={activeHtmlSection}
+            lastGrade={lastGrade}
+            isDrill={activeIsDrill}
+            deckLabel={activeCardDeckLabel}
+            stateLabel={activeCardStateLabel}
+            notePanel={studyNotePanel}
+            onSelectSection={selectStudyHtmlSection}
+            onReveal={revealAnswer}
+          />
         )}
-
         {activeCard && !activeCardHasHtml && (
           <section className="mb-4 rounded-2xl bg-white/90 border border-white shadow-sm p-4">
             {studyNotePanel}
