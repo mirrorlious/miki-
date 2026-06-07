@@ -1,4 +1,8 @@
-﻿function getDeckSection(deck) {
+import { DECK_COLOR_OPTIONS, DEFAULT_DECK_SECTIONS, UNGROUPED_SECTION } from './constants.js'
+import { stripAnswerSectionFromHtml, stripAnswerSectionFromText } from '../ankiHtml.js'
+import { getCardReviewReps, makeNewCardReview } from './reviewUtils.js'
+
+function getDeckSection(deck) {
   return deck?.section?.trim() || UNGROUPED_SECTION
 }
 
@@ -24,11 +28,11 @@ function getDeckScopeParts(deck) {
 function getDeckPath(deck) {
   const section = getDeckSection(deck)
   const chapter = getDeckChapter(deck)
-  return chapter ? `${section} / ${chapter}` : section
+  return chapter ? ${section} /  : section
 }
 
 function getDeckOptionLabel(deck) {
-  return `${getDeckPath(deck)} / ${deck.name}`
+  return ${getDeckPath(deck)} / 
 }
 
 function normalizePathPart(value = '') {
@@ -43,7 +47,7 @@ function splitAnkiDeckPath(value = '') {
 }
 
 function isAnkiMajorPathPart(value = '') {
-  return /^(?:[A-ZＡ-Ｚ]\s*)?(?:刑法学|民法学|法理学|宪法学|法制史|行政法|商经法|三国法|理论法|刑法|民法|宪法|法理|法条分析)/.test(normalizePathPart(value))
+  return /^(?:[A-Z\uFF21-\uFF3A]\s*)?(?:刑法学|民法学|法理学|宪法学|法制史|行政法|商经法|三国法|理论法|刑法|民法|宪法|法理|法条分析)/.test(normalizePathPart(value))
 }
 
 function findAnkiMajorPathIndex(sourcePath = []) {
@@ -71,7 +75,7 @@ function getAnkiDeckTarget(card, fallbackDeck) {
       section: 'Anki 导入',
       chapter: '',
       name: sourcePath[0],
-      description: `从 Anki 原卡组 ${sourcePath[0]} 导入。`,
+      description: 从 Anki 原卡组  导入。,
     }
   }
 
@@ -83,7 +87,7 @@ function getAnkiDeckTarget(card, fallbackDeck) {
       section,
       chapter: '',
       name,
-      description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入，按大科目 ${name} 归组。`,
+      description: 从 Anki 原卡组  导入，按大科目  归组。,
     }
   }
 
@@ -95,7 +99,7 @@ function getAnkiDeckTarget(card, fallbackDeck) {
     section,
     chapter,
     name,
-    description: `从 Anki 原卡组 ${sourcePath.join(' / ')} 导入。`,
+    description: 从 Anki 原卡组  导入。,
   }
 }
 
@@ -119,6 +123,17 @@ function getDeckIdentityKey(deck) {
     .join('|||')
 }
 
+function getSectionNames(decks) {
+  const customSections = decks
+    .map(getDeckSection)
+    .filter((section) => section && section !== UNGROUPED_SECTION && !DEFAULT_DECK_SECTIONS.includes(section))
+  return [
+    ...DEFAULT_DECK_SECTIONS,
+    ...Array.from(new Set(customSections)),
+    UNGROUPED_SECTION,
+  ]
+}
+
 function sortDecksByPath(decks) {
   return [...decks].sort((a, b) => getDeckOptionLabel(a).localeCompare(getDeckOptionLabel(b), 'zh-CN'))
 }
@@ -132,4 +147,65 @@ function groupDecksBySection(decks) {
     .filter((group) => group.decks.length > 0)
 }
 
-export { getDeckSection, getDeckChapter, getStableDeckColor, getDeckPath, getDeckOptionLabel, normalizePathPart, splitAnkiDeckPath, isAnkiMajorPathPart, findAnkiMajorPathIndex, getAnkiDeckTarget, summarizeAnkiDeckTargets, getDeckIdentityKey, sortDecksByPath, groupDecksBySection }
+function getDeckChapterKey(deck) {
+  return ${getDeckSection(deck)}|||
+}
+
+function getDeckChapterLabel(deck) {
+  const chapter = getDeckChapter(deck)
+  return chapter ? getDeckPath(deck) : ${getDeckSection(deck)} / 未细分
+}
+
+function getDeckCards(data, deckId) {
+  return data.cards.filter((card) => card.deckId === deckId)
+}
+
+function getDeckOutlineRows(data) {
+  return getSectionNames(data.decks)
+    .map((section) => {
+      const decks = sortDecksByPath(data.decks.filter((deck) => getDeckSection(deck) === section))
+      return {
+        section,
+        decks,
+        cardCount: decks.reduce((sum, deck) => sum + getDeckCards(data, deck.id).length, 0),
+        chapters: decks.reduce((chapters, deck) => {
+          const chapter = getDeckChapter(deck) || '未细分'
+          const current = chapters.get(chapter) ?? { chapter, decks: [], cardCount: 0 }
+          current.decks.push(deck)
+          current.cardCount += getDeckCards(data, deck.id).length
+          chapters.set(chapter, current)
+          return chapters
+        }, new Map()),
+      }
+    })
+    .filter((row) => row.decks.length > 0)
+    .map((row) => ({ ...row, chapters: Array.from(row.chapters.values()) }))
+}
+
+function normalizeImportedAnkiCards(data) {
+  let changed = false
+  const cards = data.cards.map((card) => {
+    const patch = {}
+    const reps = getCardReviewReps(card)
+
+    if (reps === 0 && (card.review?.dueDate || card.review?.dueAt || card.review?.reps !== 0)) {
+      patch.review = makeNewCardReview(card.review)
+    }
+
+    if (card?.source?.type === 'apkg') {
+      const nextFront = stripAnswerSectionFromText(card.front)
+      const nextFrontHtml = card.frontHtml ? stripAnswerSectionFromHtml(card.frontHtml) : card.frontHtml
+
+      if (nextFront && nextFront !== card.front) patch.front = nextFront
+      if (nextFrontHtml && nextFrontHtml !== card.frontHtml) patch.frontHtml = nextFrontHtml
+    }
+
+    if (Object.keys(patch).length === 0) return card
+    changed = true
+    return { ...card, ...patch }
+  })
+
+  return changed ? { ...data, cards } : data
+}
+
+export { getDeckSection, getDeckChapter, getStableDeckColor, getDeckScopeParts, getDeckPath, getDeckOptionLabel, normalizePathPart, splitAnkiDeckPath, isAnkiMajorPathPart, findAnkiMajorPathIndex, getAnkiDeckTarget, summarizeAnkiDeckTargets, getDeckIdentityKey, getSectionNames, sortDecksByPath, groupDecksBySection, getDeckChapterKey, getDeckChapterLabel, getDeckCards, getDeckOutlineRows, normalizeImportedAnkiCards }
