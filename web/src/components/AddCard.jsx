@@ -8,11 +8,24 @@ import CollapseToggle from './CollapseToggle.jsx'
 import TemplateManager from './TemplateManager.jsx'
 import DeckSelectOptions from './DeckSelectOptions.jsx'
 import Shell from './Shell.jsx'
-function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate, studyDeckId, cloud }) {
-  const { deckId } = useParams()
+function AddCard({ data, onCreateCard, onUpdateCard, onSaveCardTemplate, onDeleteCardTemplate, studyDeckId, cloud }) {
+  const { deckId, cardId } = useParams()
   const navigate = useNavigate()
-  const initialDeckId = data.decks.find((deck) => deck.id === deckId)?.id ?? data.decks[0]?.id ?? ''
-  const [form, setForm] = useState({ deckId: initialDeckId, template: 'qa', front: '', back: '', tags: '', favorite: false, flagged: false, comment: '', align: 'left' })
+  const editingCard = useMemo(() => data.cards.find((card) => card.id === cardId) ?? null, [cardId, data.cards])
+  const isEditing = Boolean(cardId && editingCard)
+  const initialDeckId = editingCard?.deckId ?? data.decks.find((deck) => deck.id === deckId)?.id ?? data.decks[0]?.id ?? ''
+  const makeFormFromCard = (card) => ({
+    deckId: card?.deckId ?? initialDeckId,
+    template: card?.template ?? 'qa',
+    front: card?.rawFront ?? card?.front ?? '',
+    back: card?.rawBack ?? card?.back ?? '',
+    tags: Array.isArray(card?.tags) ? card.tags.join(', ') : '',
+    favorite: Boolean(card?.favorite),
+    flagged: Boolean(card?.flagged),
+    comment: card?.comment ?? '',
+    align: card?.align ?? 'left',
+  })
+  const [form, setForm] = useState(() => (editingCard ? makeFormFromCard(editingCard) : { deckId: initialDeckId, template: 'qa', front: '', back: '', tags: '', favorite: false, flagged: false, comment: '', align: 'left' }))
   const [error, setError] = useState('')
   const [expandedPane, setExpandedPane] = useState(null)
   const [showTags, setShowTags] = useState(false)
@@ -32,8 +45,13 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
   const selectedCardTemplate = cardTemplates.find((template) => template.id === form.template) ?? cardTemplates[0]
 
   useEffect(() => {
+    if (editingCard) {
+      setForm(makeFormFromCard(editingCard))
+      setPreviewIndex(0)
+      return
+    }
     setForm((current) => ({ ...current, deckId: current.deckId || initialDeckId }))
-  }, [initialDeckId])
+  }, [editingCard?.id, initialDeckId])
 
   useEffect(() => {
     if (cardTemplates.some((template) => template.id === form.template)) return
@@ -100,16 +118,25 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
     }
 
     const cardValue = buildCardValueFromTemplate(form, selectedCardTemplate)
-    onCreateCard(form.deckId, {
+    const nextCardValue = {
       ...cardValue,
+      deckId: form.deckId,
       tags: form.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
       favorite: form.favorite,
       flagged: form.flagged,
       comment: form.comment.trim(),
       align: form.align,
-    })
+    }
+
+    if (isEditing && editingCard?.id) {
+      onUpdateCard?.(editingCard.id, nextCardValue)
+      navigate('/browse', { state: { deckId: form.deckId, cardId: editingCard.id } })
+      return
+    }
+
+    onCreateCard(form.deckId, nextCardValue)
     navigate('/decks')
-  }, [form, navigate, onCreateCard, selectedCardTemplate])
+  }, [editingCard?.id, form, isEditing, navigate, onCreateCard, onUpdateCard, selectedCardTemplate])
 
   useEffect(() => {
     function handleShortcut(event) {
@@ -186,6 +213,38 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
     setSelectionText(field, next, start, start + lines.join('\n').length)
   }
 
+  function wrapSelectionHtml(field, before, after = '', placeholder = '重点内容') {
+    const ref = field === 'front' ? frontRef.current : backRef.current
+    const value = form[field] ?? ''
+    const start = ref?.selectionStart ?? value.length
+    const end = ref?.selectionEnd ?? value.length
+    const selected = value.slice(start, end) || placeholder
+    const next = `${value.slice(0, start)}${before}${selected}${after}${value.slice(end)}`
+    const cursorStart = start + before.length
+    const cursorEnd = cursorStart + selected.length
+    setSelectionText(field, next, cursorStart, cursorEnd)
+  }
+
+  function applyInlineStyle(style, placeholder = '重点内容') {
+    const field = getActiveEditorField()
+    wrapSelectionHtml(field, `<span style="${style}">`, '</span>', placeholder)
+    setForm((current) => ({ ...current, template: current.template || 'qa' }))
+  }
+
+  function insertHtmlList(ordered = false) {
+    const field = getActiveEditorField()
+    const ref = field === 'front' ? frontRef.current : backRef.current
+    const value = form[field] ?? ''
+    const start = ref?.selectionStart ?? value.length
+    const end = ref?.selectionEnd ?? value.length
+    const selected = value.slice(start, end) || '第一条\n第二条\n第三条'
+    const lines = selected.split('\n').map((line) => line.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean)
+    const tag = ordered ? 'ol' : 'ul'
+    const html = `<${tag}>${lines.map((line) => `<li>${line}</li>`).join('')}</${tag}>`
+    const next = `${value.slice(0, start)}${html}${value.slice(end)}`
+    setSelectionText(field, next, start, start + html.length)
+  }
+
   function insertVideoLink() {
     const url = window.prompt('输入视频 URL')
     if (!url?.trim()) return
@@ -212,13 +271,26 @@ function AddCard({ data, onCreateCard, onSaveCardTemplate, onDeleteCardTemplate,
 
   function applyEditorTool(tool) {
     const field = getActiveEditorField()
+
+    if (tool.startsWith('color:')) {
+      applyInlineStyle(`color:${tool.slice(6)};font-weight:800`, '彩色重点')
+      return
+    }
+
+    if (tool.startsWith('size:')) {
+      applyInlineStyle(`font-size:${tool.slice(5)};line-height:1.7`, '字号内容')
+      return
+    }
+
     const actions = {
-      bold: () => insertIntoField(field, '**', '**', '加粗内容'),
-      underline: () => insertIntoField(field, '<u>', '</u>', '下划线内容'),
-      italic: () => insertIntoField(field, '*', '*', '斜体内容'),
-      strike: () => insertIntoField(field, '~~', '~~', '删除线内容'),
-      list: () => insertLinePrefix('- '),
-      ordered: () => insertLinePrefix('', true),
+      bold: () => wrapSelectionHtml(field, '<strong>', '</strong>', '加粗内容'),
+      underline: () => wrapSelectionHtml(field, '<u>', '</u>', '下划线内容'),
+      italic: () => wrapSelectionHtml(field, '<em>', '</em>', '斜体内容'),
+      strike: () => wrapSelectionHtml(field, '<s>', '</s>', '删除线内容'),
+      highlight: () => wrapSelectionHtml(field, '<mark>', '</mark>', '高亮内容'),
+      list: () => insertHtmlList(false),
+      ordered: () => insertHtmlList(true),
+      quote: () => wrapSelectionHtml(field, '<blockquote>', '</blockquote>', '引用/例外/提示'),
       image: () => imageFileInputRef.current?.click(),
       video: () => insertVideoLink(),
       align: () => {
@@ -276,6 +348,8 @@ ${previewBack}`.trim()
     { icon: Strikethrough, label: '删除线', action: 'strike' },
     { icon: List, label: '项目列表', action: 'list' },
     { icon: ListOrdered, label: '编号列表', action: 'ordered' },
+    { icon: Sparkles, label: '高亮', action: 'highlight' },
+    { icon: GripHorizontal, label: '引用块', action: 'quote' },
     { icon: Image, label: '插入图片', action: 'image' },
     { icon: Video, label: '插入视频', action: 'video' },
     { icon: AlignLeft, label: alignLabel, action: 'align' },
@@ -297,13 +371,13 @@ ${previewBack}`.trim()
       />
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-gray-950">添加卡片</h1><p className="mt-1 text-xs text-gray-500">单张制卡、粘贴 HTML/富文本，并实时预览。</p>
+          <h1 className="text-2xl font-black text-gray-950">{isEditing ? '编辑卡片' : '添加卡片'}</h1><p className="mt-1 text-xs text-gray-500">{isEditing ? '调整内容、模板和富文本样式，保存后立即更新原卡。' : '单张制卡、粘贴 HTML/富文本，并实时预览。'}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => navigate('/import')} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50"><Upload size={15} /> 批量制卡</button>
           <a href="https://anki-card-maker-xi.vercel.app/" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50"><ExternalLink size={15} /> AI制卡器</a>
           <button type="button" onClick={() => navigate('/decks')} className="h-10 px-4 rounded-xl bg-white text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">取消</button>
-          <button type="button" onClick={handleSave} className="h-10 px-5 rounded-xl bg-[#007aff] text-sm font-bold text-white shadow-sm hover:bg-[#006ee6]">保存</button>
+          <button type="button" onClick={handleSave} className="h-10 px-5 rounded-xl bg-[#007aff] text-sm font-bold text-white shadow-sm hover:bg-[#006ee6]">{isEditing ? '保存修改' : '保存'}</button>
         </div>
       </header>
 
@@ -376,6 +450,40 @@ ${previewBack}`.trim()
                     <Icon size={16} />
                   </button>
                 ))}
+                <select
+                  defaultValue=""
+                  onChange={(event) => {
+                    if (event.target.value) applyEditorTool(`size:${event.target.value}`)
+                    event.target.value = ''
+                  }}
+                  className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs font-black text-gray-500 outline-none hover:border-gray-300"
+                  title="字号"
+                >
+                  <option value="">字号</option>
+                  <option value="14px">14</option>
+                  <option value="16px">16</option>
+                  <option value="18px">18</option>
+                  <option value="22px">22</option>
+                  <option value="28px">28</option>
+                </select>
+                <div className="flex items-center gap-1 border-l border-gray-100 pl-2">
+                  {[
+                    ['#ef4444', '红色'],
+                    ['#0b78ff', '蓝色'],
+                    ['#16a34a', '绿色'],
+                    ['#f97316', '橙色'],
+                    ['#111827', '黑色'],
+                  ].map(([color, label]) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => applyEditorTool(`color:${color}`)}
+                      title={label}
+                      className="h-5 w-5 rounded-full border border-white shadow ring-1 ring-gray-200"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
                 <input ref={imageFileInputRef} type="file" accept="image/*" onChange={handleImageFile} className="hidden" />
                 <button type="button" onClick={() => setShowMoreTools((current) => !current)} title={showMoreTools ? '收起更多工具' : '更多'} aria-pressed={showMoreTools} className="ml-auto w-8 h-8 flex items-center justify-center hover:bg-gray-100 hover:text-gray-700 rounded-lg">
                   <MoreVertical size={16} />
@@ -466,7 +574,7 @@ ${previewBack}`.trim()
                   <Settings size={18} />
                 </button>
                 <button type="button" onClick={handleSave} className="h-9 w-[150px] rounded-xl bg-[#34c759] text-sm font-bold text-white shadow-sm hover:bg-[#30b454]">
-                  保存(Ctrl+S)
+                  {isEditing ? '保存修改' : '保存'}(Ctrl+S)
                 </button>
               </div>
             </div>

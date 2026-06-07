@@ -867,6 +867,8 @@ export default function App() {
             flagged: Boolean(cardValue.flagged),
             comment: cardValue.comment ?? '',
             align: cardValue.align ?? 'left',
+            rawFront: cardValue.rawFront ?? cardValue.front ?? '',
+            rawBack: cardValue.rawBack ?? cardValue.back ?? '',
             ...(cardValue.frontHtml ? { frontHtml: cardValue.frontHtml } : {}),
             ...(cardValue.backHtml ? { backHtml: cardValue.backHtml } : {}),
             ...(cardValue.cardCss ? { cardCss: cardValue.cardCss } : {}),
@@ -879,6 +881,38 @@ export default function App() {
           },
           ...current.cards,
         ],
+      }))
+    })
+  }
+
+  function updateCard(cardId, cardValue = {}) {
+    if (!cardId) return
+    startTransition(() => {
+      setData((current) => ({
+        ...current,
+        cards: current.cards.map((card) => {
+          if (card.id !== cardId) return card
+          return {
+            ...card,
+            deckId: cardValue.deckId ?? card.deckId,
+            front: cardValue.front ?? card.front,
+            back: cardValue.back ?? card.back,
+            rawFront: cardValue.rawFront ?? cardValue.front ?? card.rawFront ?? card.front ?? '',
+            rawBack: cardValue.rawBack ?? cardValue.back ?? card.rawBack ?? card.back ?? '',
+            template: cardValue.template ?? card.template ?? 'qa',
+            tags: cardValue.tags ?? card.tags ?? [],
+            favorite: Boolean(cardValue.favorite),
+            flagged: Boolean(cardValue.flagged),
+            comment: cardValue.comment ?? '',
+            align: cardValue.align ?? card.align ?? 'left',
+            frontHtml: cardValue.frontHtml || undefined,
+            backHtml: cardValue.backHtml || undefined,
+            cardCss: cardValue.cardCss || undefined,
+            cardJs: cardValue.cardJs || undefined,
+            htmlSections: cardValue.htmlSections || undefined,
+            updatedAt: Date.now(),
+          }
+        }),
       }))
     })
   }
@@ -930,6 +964,8 @@ export default function App() {
             ...(card.flagged ? { flagged: card.flagged } : {}),
             ...(card.comment ? { comment: card.comment } : {}),
             ...(card.align ? { align: card.align } : {}),
+            rawFront: card.rawFront ?? card.front ?? '',
+            rawBack: card.rawBack ?? card.back ?? '',
             ...(card.frontHtml ? { frontHtml: card.frontHtml } : {}),
             ...(card.backHtml ? { backHtml: card.backHtml } : {}),
             ...(card.cardCss ? { cardCss: card.cardCss } : {}),
@@ -1195,7 +1231,8 @@ export default function App() {
         <Route path="/organize" element={<Organize data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/profile" element={<Profile data={appData} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />
-        <Route path="/cards/new/:deckId" element={<AddCard data={appData} onCreateCard={createCard} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/cards/new/:deckId" element={<AddCard data={appData} onCreateCard={createCard} onUpdateCard={updateCard} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/cards/edit/:cardId" element={<AddCard data={appData} onCreateCard={createCard} onUpdateCard={updateCard} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/study/:deckId" element={<Study data={appData} onReviewCard={reviewCard} onUpdateCardMeta={updateCardMeta} studyDeckId={studyDeckId} cloud={cloud} />} />
         </Routes>
       </ErrorBoundary>

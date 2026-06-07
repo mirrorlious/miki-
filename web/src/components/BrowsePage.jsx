@@ -10,6 +10,7 @@ import { motion } from 'framer-motion'
 import DOMPurify from 'dompurify'
 import {
   AlignLeft,
+  ArrowUpDown,
   BookOpen,
   Brain,
   Bold,
@@ -18,6 +19,7 @@ import {
   ChevronRight,
   Cloud,
   CloudOff,
+  Eye,
   Flag,
   FolderOpen,
   Gift,
@@ -36,6 +38,8 @@ import {
   MoreVertical,
   PencilLine,
   Plus,
+  PauseCircle,
+  RotateCcw,
   Settings,
   Star,
   Strikethrough,
@@ -787,8 +791,9 @@ function BrowseWorktable({
   const location = useLocation()
   const navigate = useNavigate()
   const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
+  const initialCardId = location.state?.cardId ?? null
   const [selectedScopeKey, setSelectedScopeKey] = useState('all')
-  const [selectedCardId, setSelectedCardId] = useState(null)
+  const [selectedCardId, setSelectedCardId] = useState(initialCardId)
   const [selectedDeckId, setSelectedDeckId] = useState(initialDeckId)
   const [query, setQuery] = useState('')
   const [cardFilter, setCardFilter] = useState('all')
@@ -1134,6 +1139,62 @@ ${title}
     setContextMenu(null)
   }
 
+  function makeFreshReview() {
+    return { dueDate: '', interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null }
+  }
+
+  function resetCardProgress(card) {
+    if (!card?.id) return
+    onUpdateCardMeta?.(card.id, { review: makeFreshReview() })
+    setContextMenu(null)
+  }
+
+  function toggleCardSuspended(card) {
+    if (!card?.id) return
+    onUpdateCardMeta?.(card.id, { suspended: !card.suspended })
+    setContextMenu(null)
+  }
+
+  function openCardEditor(card) {
+    if (!card?.id) return
+    navigate(`/cards/edit/${card.id}`)
+    setContextMenu(null)
+  }
+
+  function addCardBeside(card) {
+    const targetDeckId = card?.deckId ?? selectedScopeDeckId
+    if (!targetDeckId) return
+    navigate(`/cards/new/${targetDeckId}`)
+    setContextMenu(null)
+  }
+
+  function openCardTemplatePreview(card) {
+    if (!card?.id) return
+    setSelectedCardId(card.id)
+    setPreviewMode('html')
+    setContextMenu(null)
+  }
+
+  function openSortHint(card) {
+    setSelectedCardId(card?.id ?? null)
+    window.alert('排序入口已放好。当前版本会先选中这张卡；后续可以接入拖拽排序或同目录内上下移动。')
+    setContextMenu(null)
+  }
+
+  function renderCardMenuButton(card) {
+    return (
+      <button
+        type="button"
+        onClick={(event) => openContextMenu(event, { type: 'card', cardId: card.id })}
+        className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-green-500 opacity-0 transition hover:bg-green-50 group-hover:opacity-100 focus:opacity-100"
+        title="卡片操作"
+        aria-label="卡片操作"
+      >
+        <MoreVertical size={14} />
+      </button>
+    )
+  }
+
   function renderFavoriteControl(card, size = 'sm') {
     const isLarge = size === 'lg'
     return (
@@ -1423,12 +1484,15 @@ ${title}
                         }
                       }}
                       onContextMenu={(event) => openContextMenu(event, { type: 'card', cardId: card.id })}
-                      className={`flex min-h-[170px] cursor-pointer flex-col rounded-lg border px-3 py-3 text-left shadow-sm transition-colors ${selectedCard?.id === card.id ? 'border-green-200 bg-green-50/90' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                      className={`group relative flex min-h-[170px] cursor-pointer flex-col rounded-lg border px-3 py-3 text-left shadow-sm transition-colors ${selectedCard?.id === card.id ? 'border-green-200 bg-green-50/90' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="line-clamp-3 min-w-0 flex-1 text-sm font-black leading-5 text-gray-950">{compactCardText(card.front, 96)}</h3>
-                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black ${isNewCard(card) ? 'bg-blue-50 text-blue-600' : isCardDue(card) ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
-                          {getCardReviewStateLabel(card)}
+                        <span className="flex shrink-0 items-center gap-1">
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-black ${card.suspended ? 'bg-gray-100 text-gray-400' : isNewCard(card) ? 'bg-blue-50 text-blue-600' : isCardDue(card) ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                            {card.suspended ? '暂停' : getCardReviewStateLabel(card)}
+                          </span>
+                          {renderCardMenuButton(card)}
                         </span>
                       </div>
                       <p className="mt-2 line-clamp-5 flex-1 text-xs leading-5 text-gray-500">{compactCardText(card.back, 220)}</p>
@@ -1552,13 +1616,42 @@ ${title}
         <div className="fixed z-50 w-56 rounded-xl border border-gray-200 bg-white p-1.5 text-xs font-bold text-gray-700 shadow-2xl" style={menuStyle} onClick={(event) => event.stopPropagation()}>
           {contextCard ? (
             <>
+              <button type="button" onClick={() => openCardEditor(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <PencilLine size={14} className="text-gray-400" />
+                编辑
+              </button>
+              <button type="button" onClick={() => addCardBeside(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <Plus size={14} className="text-gray-400" />
+                往左添加卡片
+              </button>
+              <button type="button" onClick={() => addCardBeside(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <Plus size={14} className="text-gray-400" />
+                往右添加卡片
+              </button>
+              <button type="button" onClick={() => openCardTemplatePreview(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <Eye size={14} className="text-gray-400" />
+                查看模板
+              </button>
+              <button type="button" onClick={() => resetCardProgress(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <RotateCcw size={14} className="text-gray-400" />
+                重置进度
+              </button>
+              <button type="button" onClick={() => toggleCardSuspended(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <PauseCircle size={14} className="text-gray-400" />
+                {contextCard.suspended ? '取消暂停' : '暂停'}
+              </button>
+              <button type="button" onClick={() => openSortHint(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
+                <ArrowUpDown size={14} className="text-gray-400" />
+                排序
+              </button>
+              <div className="my-1 h-px bg-gray-100" />
               <button type="button" onClick={() => { toggleCardFavorite(contextCard); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-gray-50">
                 <Star size={14} fill={contextCard.favorite ? 'currentColor' : 'none'} className={contextCard.favorite ? 'text-yellow-500' : 'text-gray-400'} />
                 {contextCard.favorite ? '取消星标' : '设为星标'}
               </button>
               <button type="button" onClick={() => deleteCardWithConfirm(contextCard)} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-red-600 hover:bg-red-50 disabled:text-gray-300" disabled={!onDeleteCards}>
                 <Trash2 size={14} />
-                删除这张卡片
+                删除
               </button>
               <div className="my-1 h-px bg-gray-100" />
               <button type="button" onClick={() => { setCardFlagColor(contextCard, ''); setContextMenu(null) }} className="flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-gray-400 hover:bg-gray-50">
@@ -1612,8 +1705,9 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
   const location = useLocation()
   const navigate = useNavigate()
   const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
+  const initialCardId = location.state?.cardId ?? null
   const [selectedDeckId, setSelectedDeckId] = useState(initialDeckId)
-  const [selectedCardId, setSelectedCardId] = useState(null)
+  const [selectedCardId, setSelectedCardId] = useState(initialCardId)
   const [query, setQuery] = useState('')
   const [cardFilter, setCardFilter] = useState('all')
   const [annotationType, setAnnotationType] = useState(ANNOTATION_TYPES[0])

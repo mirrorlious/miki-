@@ -82,7 +82,13 @@ function escapeHtmlText(value = '') {
 function makeTemplateFieldHtml(value = '') {
   const text = String(value ?? '')
   if (!text) return ''
-  return looksLikeHtml(text) ? text : escapeHtmlText(text).replace(/\n/g, '<br>')
+  if (looksLikeHtml(text)) {
+    // Mixed rich text often comes from the in-app editor as plain text + small HTML tags.
+    // Keep real HTML, but preserve line breaks when the content is not already block-formatted.
+    const hasBlockHtml = /<(?:p|div|section|article|ul|ol|li|table|blockquote|h[1-6]|br)\b/i.test(text)
+    return hasBlockHtml ? text : text.replace(/\n/g, '<br>')
+  }
+  return escapeHtmlText(text).replace(/\n/g, '<br>')
 }
 
 function applyCardTemplateCode(code = '', fields = {}) {
@@ -91,6 +97,7 @@ function applyCardTemplateCode(code = '', fields = {}) {
     Back: makeTemplateFieldHtml(fields.back),
   }
   return String(code || '')
+    .replace(/{{\s*FrontSide\s*}}/gi, fieldHtml.Front)
     .replace(/{{\s*(?:Front|front|问题|题目|正面)\s*}}/gi, fieldHtml.Front)
     .replace(/{{\s*(?:Back|back|答案|解析|背面|反面)\s*}}/gi, fieldHtml.Back)
 }
@@ -110,6 +117,8 @@ function buildCardValueFromTemplate(form, template) {
   return {
     front: frontText,
     back: backText,
+    rawFront: front,
+    rawBack: back,
     template: selectedTemplate.id,
     ...(frontHtml ? { frontHtml } : {}),
     ...(backHtml ? { backHtml } : {}),
