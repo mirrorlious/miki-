@@ -1,4 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { getActivity, getDailyLogs, getReviewLogs, toLocalDateKey } from '../lib/activity.js';
 
 const STAT_ITEMS = [
   {
@@ -55,42 +57,117 @@ const STAT_ITEMS = [
   },
 ];
 
-const generateMockHeatmapData = () => {
-  const data = [];
-  const today = new Date();
-  for (let i = 0; i < 84; i++) { 
-    const date = new Date(today);
-    date.setDate(today.getDate() - i);
-    data.push({
-      date: date.toISOString().split('T')[0],
-      count: Math.floor(Math.random() * 15), 
-    });
+function pad2(value) {
+  return String(value).padStart(2, '0')
+}
+
+function toMonthValue(date = new Date()) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
+}
+
+function monthValueToDate(monthValue) {
+  const [year, month] = String(monthValue || toMonthValue()).split('-').map(Number)
+  return new Date(year || new Date().getFullYear(), Math.max(0, (month || 1) - 1), 1)
+}
+
+function shiftMonth(monthValue, offset) {
+  const base = monthValueToDate(monthValue)
+  base.setMonth(base.getMonth() + offset)
+  return toMonthValue(base)
+}
+
+function getMonthDays(monthValue) {
+  const [year, month] = String(monthValue || toMonthValue()).split('-').map(Number)
+  const days = new Date(year, month, 0).getDate()
+  return Array.from({ length: days }, (_, index) => {
+    const day = index + 1
+    const key = `${year}-${pad2(month)}-${pad2(day)}`
+    return { key, day }
+  })
+}
+
+function getLevel(score) {
+  const value = Number(score) || 0
+  if (value <= 0) return 0
+  if (value < 3) return 1
+  if (value < 7) return 2
+  if (value < 14) return 3
+  return 4
+}
+
+function getCellColorClass(day, todayKey, activity) {
+  const level = getLevel((activity.cards || 0) + (activity.reviews || 0) + (activity.logs || 0) + Math.floor((activity.minutes || 0) / 20))
+  if (level > 0) {
+    return ['bg-emerald-200', 'bg-emerald-300', 'bg-emerald-400', 'bg-emerald-500'][level - 1]
   }
-  return data.reverse();
-};
+  if (day.key > todayKey) return 'bg-white ring-1 ring-slate-100'
+  return 'bg-slate-100'
+}
+
+function formatMonthLabel(monthValue) {
+  const date = monthValueToDate(monthValue)
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit' })
+}
+
+function buildMonthActivity(data, scopeCardIds) {
+  const safeCards = Array.isArray(data?.cards) ? data.cards : []
+  const scopedIds = scopeCardIds && scopeCardIds.size > 0 ? scopeCardIds : null
+  const map = new Map()
+  const ensure = (key) => {
+    const current = map.get(key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0 }
+    map.set(key, current)
+    return current
+  }
+
+  for (const card of safeCards) {
+    if (scopedIds && !scopedIds.has(card.id)) continue
+    if (!card.createdAt) continue
+    ensure(toLocalDateKey(card.createdAt)).cards += 1
+  }
+
+  for (const log of getReviewLogs(data)) {
+    if (scopedIds && !scopedIds.has(log.cardId)) continue
+    if (!log.reviewedAt) continue
+    ensure(toLocalDateKey(log.reviewedAt)).reviews += 1
+  }
+
+  for (const log of getDailyLogs(data)) {
+    if (!log.date || !log.content?.trim()) continue
+    if (!scopedIds) ensure(log.date).logs += 1
+  }
+
+  const dailySiteSeconds = getActivity(data).dailySiteSeconds
+  for (const [key, seconds] of Object.entries(dailySiteSeconds)) {
+    if (!scopedIds) ensure(key).minutes += Math.round((Number(seconds) || 0) / 60)
+  }
+
+  return map
+}
 
 export default function StudyStatsPanel({
   reviewed, dueCount, isDrill, progressPercent,
   reviewedCount, newCardCount, masteredCount, sessionTotal,
+  data, scopeCardIds,
 }) {
   const props = { reviewed, dueCount, isDrill, progressPercent, reviewedCount, newCardCount, masteredCount, sessionTotal };
-  
-  const heatmapData = useMemo(() => generateMockHeatmapData(), []);
-  const getColorIntensity = (count) => {
-    if (count === 0) return 'bg-slate-100'; 
-    if (count < 3) return 'bg-emerald-200';
-    if (count < 7) return 'bg-emerald-300';
-    if (count < 12) return 'bg-emerald-400';
-    return 'bg-emerald-500'; 
-  };
+  const [selectedMonth, setSelectedMonth] = useState(() => toMonthValue())
+  const [hoveredDay, setHoveredDay] = useState(null)
+  const todayKey = toLocalDateKey(new Date())
+  const scopeIdSet = useMemo(() => new Set(Array.isArray(scopeCardIds) ? scopeCardIds : []), [scopeCardIds])
+  const monthDays = useMemo(() => getMonthDays(selectedMonth), [selectedMonth])
+  const activityMap = useMemo(() => buildMonthActivity(data, scopeIdSet), [data, scopeIdSet])
+  const activeDays = useMemo(() => monthDays.filter((day) => {
+    const activity = activityMap.get(day.key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0 }
+    return activity.cards || activity.reviews || activity.logs || activity.minutes
+  }).length, [activityMap, monthDays])
+
+  const openDateDetail = (dateKey) => {
+    window.open(`/focus-log?date=${encodeURIComponent(dateKey)}`, '_blank', 'noopener,noreferrer')
+  }
 
   return (
     <section className="mb-6 bg-white rounded-[1.25rem] border border-slate-200 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden">
-      
-      {/* 核心改动：摒弃 lg 媒体查询，使用 flex-wrap 让它具备容器感知能力 */}
       <div className="flex flex-wrap">
-        
-        {/* 左侧：4个核心数据面板。设定 basis-[320px] 保证它的最小健康可读宽度 */}
         <div className="flex-[3] basis-[320px] min-w-[280px] p-5 lg:p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-bold text-slate-800 tracking-wide">学习概览</h2>
@@ -98,7 +175,7 @@ export default function StudyStatsPanel({
           
           <div className="grid grid-cols-2 gap-x-3 gap-y-6">
             {STAT_ITEMS.map((item) => (
-              <div key={item.key} className="flex flex-col min-w-0"> {/* min-w-0 防止 flex 子项被撑爆 */}
+              <div key={item.key} className="flex flex-col min-w-0">
                 <div className="flex items-center gap-2 mb-2">
                   <div className={`p-1.5 rounded-md ${item.iconBg} ${item.iconColor} shrink-0`}>
                     {item.icon}
@@ -120,35 +197,94 @@ export default function StudyStatsPanel({
           </div>
         </div>
 
-        {/* 右侧：热力图。去掉了死板的宽度，完全靠背景色区分边界，空间不够会自动掉到第二行 */}
         <div className="flex-[2] basis-[280px] min-w-[280px] p-5 lg:p-6 bg-slate-50/70 flex flex-col justify-center">
-          <div className="flex items-center justify-between mb-4">
-             <h2 className="text-sm font-bold text-slate-800 tracking-wide">近12周趋势</h2>
-             <span className="text-[10px] font-medium text-emerald-600 bg-emerald-100/50 px-2 py-0.5 rounded-full shrink-0">
-               持续记录
-             </span>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+             <h2 className="text-sm font-bold text-slate-800 tracking-wide">本月趋势</h2>
+             <div className="flex items-center gap-1 shrink-0">
+               <button
+                 type="button"
+                 onClick={() => setSelectedMonth((current) => shiftMonth(current, -1))}
+                 className="grid h-6 w-6 place-items-center rounded-lg bg-white text-slate-400 ring-1 ring-slate-100 hover:text-slate-700"
+                 aria-label="上个月"
+               >
+                 <ChevronLeft size={13} />
+               </button>
+               <label className="relative inline-flex h-6 cursor-pointer items-center rounded-full bg-emerald-100/60 px-2 text-[10px] font-bold text-emerald-700">
+                 {formatMonthLabel(selectedMonth)} · {activeDays}天
+                 <input
+                   type="month"
+                   value={selectedMonth}
+                   onChange={(event) => setSelectedMonth(event.target.value || toMonthValue())}
+                   className="absolute inset-0 cursor-pointer opacity-0"
+                   aria-label="选择月份"
+                 />
+               </label>
+               <button
+                 type="button"
+                 onClick={() => setSelectedMonth((current) => shiftMonth(current, 1))}
+                 className="grid h-6 w-6 place-items-center rounded-lg bg-white text-slate-400 ring-1 ring-slate-100 hover:text-slate-700"
+                 aria-label="下个月"
+               >
+                 <ChevronRight size={13} />
+               </button>
+             </div>
           </div>
           
           <div className="flex flex-col gap-2">
-            {/* 加入了 w-full 和 overflow-x-auto，如果容器真的被压缩到了极限，热力图内部可横向滑动，绝不挤压变形 */}
             <div className="w-full overflow-x-auto pb-1 scrollbar-hide">
-              <div className="grid grid-rows-7 grid-flow-col gap-1 w-max">
-                {heatmapData.map((day, index) => (
-                  <div
-                    key={index}
-                    className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-[2px] ${getColorIntensity(day.count)} transition-all hover:scale-125 cursor-pointer`}
-                    title={`${day.date}: ${day.count} 次`}
-                  />
-                ))}
+              <div className="grid grid-rows-7 grid-flow-col gap-1 w-max pr-1">
+                {monthDays.map((day) => {
+                  const activity = activityMap.get(day.key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0 }
+                  const isToday = day.key === todayKey
+                  return (
+                    <button
+                      key={day.key}
+                      type="button"
+                      onMouseEnter={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect()
+                        setHoveredDay({
+                          ...day,
+                          ...activity,
+                          x: rect.left + rect.width / 2,
+                          y: rect.top,
+                        })
+                      }}
+                      onMouseLeave={() => setHoveredDay(null)}
+                      onClick={() => openDateDetail(day.key)}
+                      className={`relative w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-[2px] ${getCellColorClass(day, todayKey, activity)} transition-all hover:scale-125 cursor-pointer ${isToday ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
+                      title={`${day.key}：复习 ${activity.reviews || 0}，新卡 ${activity.cards || 0}`}
+                    />
+                  )
+                })}
               </div>
             </div>
+
+            {hoveredDay && (
+              <div
+                className="pointer-events-none fixed z-[9999] min-w-[150px] -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold leading-5 text-white shadow-2xl"
+                style={{ left: hoveredDay.x, top: hoveredDay.y }}
+              >
+                <p className="font-black">{hoveredDay.key}</p>
+                {hoveredDay.key > todayKey ? (
+                  <p className="text-white/70">还没到这一天</p>
+                ) : (hoveredDay.cards || hoveredDay.reviews || hoveredDay.logs || hoveredDay.minutes) ? (
+                  <>
+                    <p className="text-white/80">复习 {hoveredDay.reviews || 0} · 新卡 {hoveredDay.cards || 0}</p>
+                    <p className="text-white/80">日志 {hoveredDay.logs || 0} · 专注 {hoveredDay.minutes || 0} 分钟</p>
+                  </>
+                ) : (
+                  <p className="text-white/70">当天暂无记录</p>
+                )}
+                <p className="mt-1 text-[10px] text-white/45">点击查看当天详情</p>
+              </div>
+            )}
             
             <div className="flex justify-between items-center mt-1">
-              <span className="text-[10px] text-slate-400 font-medium">{heatmapData[0]?.date.slice(5)}</span>
+              <span className="text-[10px] text-slate-400 font-medium">{monthDays[0]?.key.slice(5)}</span>
               <div className="flex items-center gap-1.5 opacity-80 shrink-0">
                 <span className="text-[9px] text-slate-400">少</span>
                 <div className="flex gap-[2px]">
-                  <div className="w-2 h-2 rounded-[1px] bg-slate-100"></div>
+                  <div className="w-2 h-2 rounded-[1px] bg-slate-100 ring-1 ring-slate-100"></div>
                   <div className="w-2 h-2 rounded-[1px] bg-emerald-200"></div>
                   <div className="w-2 h-2 rounded-[1px] bg-emerald-300"></div>
                   <div className="w-2 h-2 rounded-[1px] bg-emerald-400"></div>
