@@ -391,7 +391,7 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
       <div className="shell-stretch max-w-3xl mx-auto w-full">
 
         <StudyStatsPanel
-          data={appData}
+          data={data}
           scopeCardIds={studyCards.map((card) => card.id)}
           reviewed={session.reviewed}
           dueCount={queue.length}
