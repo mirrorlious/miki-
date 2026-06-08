@@ -96,7 +96,7 @@ function getLevel(score) {
 }
 
 function getCellColorClass(day, todayKey, activity) {
-  const level = getLevel((activity.cards || 0) + (activity.reviews || 0) + (activity.logs || 0) + Math.floor((activity.minutes || 0) / 20))
+  const level = getLevel((activity.cards || 0) + (activity.reviews || 0) + (activity.logs || 0) + (activity.sessions || 0) + Math.floor((activity.minutes || 0) / 20))
   if (level > 0) {
     return ['bg-emerald-200', 'bg-emerald-300', 'bg-emerald-400', 'bg-emerald-500'][level - 1]
   }
@@ -109,36 +109,38 @@ function formatMonthLabel(monthValue) {
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit' })
 }
 
-function buildMonthActivity(data, scopeCardIds) {
+function buildMonthActivity(data) {
   const safeCards = Array.isArray(data?.cards) ? data.cards : []
-  const scopedIds = scopeCardIds && scopeCardIds.size > 0 ? scopeCardIds : null
   const map = new Map()
   const ensure = (key) => {
-    const current = map.get(key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0 }
+    const current = map.get(key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0, sessions: 0 }
     map.set(key, current)
     return current
   }
 
   for (const card of safeCards) {
-    if (scopedIds && !scopedIds.has(card.id)) continue
     if (!card.createdAt) continue
     ensure(toLocalDateKey(card.createdAt)).cards += 1
   }
 
   for (const log of getReviewLogs(data)) {
-    if (scopedIds && !scopedIds.has(log.cardId)) continue
     if (!log.reviewedAt) continue
     ensure(toLocalDateKey(log.reviewedAt)).reviews += 1
   }
 
   for (const log of getDailyLogs(data)) {
     if (!log.date || !log.content?.trim()) continue
-    if (!scopedIds) ensure(log.date).logs += 1
+    ensure(log.date).logs += 1
   }
 
-  const dailySiteSeconds = getActivity(data).dailySiteSeconds
-  for (const [key, seconds] of Object.entries(dailySiteSeconds)) {
-    if (!scopedIds) ensure(key).minutes += Math.round((Number(seconds) || 0) / 60)
+  const activity = getActivity(data)
+  for (const [key, seconds] of Object.entries(activity.dailySiteSeconds)) {
+    ensure(key).minutes += Math.round((Number(seconds) || 0) / 60)
+  }
+
+  for (const item of activity.focusLog) {
+    if (!item?.startedAt) continue
+    ensure(toLocalDateKey(item.startedAt)).sessions += 1
   }
 
   return map
@@ -155,10 +157,10 @@ export default function StudyStatsPanel({
   const todayKey = toLocalDateKey(new Date())
   const scopeIdSet = useMemo(() => new Set(Array.isArray(scopeCardIds) ? scopeCardIds : []), [scopeCardIds])
   const monthDays = useMemo(() => getMonthDays(selectedMonth), [selectedMonth])
-  const activityMap = useMemo(() => buildMonthActivity(data, scopeIdSet), [data, scopeIdSet])
+  const activityMap = useMemo(() => buildMonthActivity(data), [data])
   const activeDays = useMemo(() => monthDays.filter((day) => {
-    const activity = activityMap.get(day.key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0 }
-    return activity.cards || activity.reviews || activity.logs || activity.minutes
+    const activity = activityMap.get(day.key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0, sessions: 0 }
+    return activity.cards || activity.reviews || activity.logs || activity.minutes || activity.sessions
   }).length, [activityMap, monthDays])
 
   const openDateDetail = (dateKey) => {
@@ -231,10 +233,10 @@ export default function StudyStatsPanel({
           </div>
           
           <div className="flex flex-col gap-2">
-            <div className="w-full overflow-x-auto pb-1 scrollbar-hide">
-              <div className="grid grid-rows-7 grid-flow-col gap-1 w-max pr-1">
+            <div className="w-full overflow-visible pb-1">
+              <div className="grid w-max grid-cols-7 gap-1 pr-1">
                 {monthDays.map((day) => {
-                  const activity = activityMap.get(day.key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0 }
+                  const activity = activityMap.get(day.key) ?? { cards: 0, reviews: 0, logs: 0, minutes: 0, sessions: 0 }
                   const isToday = day.key === todayKey
                   return (
                     <button
@@ -251,8 +253,8 @@ export default function StudyStatsPanel({
                       }}
                       onMouseLeave={() => setHoveredDay(null)}
                       onClick={() => openDateDetail(day.key)}
-                      className={`relative w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-[2px] ${getCellColorClass(day, todayKey, activity)} transition-all hover:scale-125 cursor-pointer ${isToday ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
-                      title={`${day.key}：复习 ${activity.reviews || 0}，新卡 ${activity.cards || 0}`}
+                      className={`relative h-3 w-3 rounded-[2px] ${getCellColorClass(day, todayKey, activity)} transition-all hover:z-10 hover:scale-125 cursor-pointer ${isToday ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
+                      title={`${day.key}：复习 ${activity.reviews || 0}，新卡 ${activity.cards || 0}，专注 ${activity.minutes || 0} 分钟`}
                     />
                   )
                 })}
@@ -267,10 +269,11 @@ export default function StudyStatsPanel({
                 <p className="font-black">{hoveredDay.key}</p>
                 {hoveredDay.key > todayKey ? (
                   <p className="text-white/70">还没到这一天</p>
-                ) : (hoveredDay.cards || hoveredDay.reviews || hoveredDay.logs || hoveredDay.minutes) ? (
+                ) : (hoveredDay.cards || hoveredDay.reviews || hoveredDay.logs || hoveredDay.minutes || hoveredDay.sessions) ? (
                   <>
                     <p className="text-white/80">复习 {hoveredDay.reviews || 0} · 新卡 {hoveredDay.cards || 0}</p>
                     <p className="text-white/80">日志 {hoveredDay.logs || 0} · 专注 {hoveredDay.minutes || 0} 分钟</p>
+                    <p className="text-white/80">打开学习 {hoveredDay.sessions || 0} 次</p>
                   </>
                 ) : (
                   <p className="text-white/70">当天暂无记录</p>
