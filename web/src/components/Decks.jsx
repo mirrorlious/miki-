@@ -76,13 +76,13 @@ function getDeckRows(decks, cards) {
 
 function MetricTile({ icon: Icon, label, value, hint, tone }) {
   return (
-    <div className="metric-tile group relative flex min-h-[118px] min-w-0 flex-col justify-end overflow-hidden rounded-[18px] border border-white/80 bg-white/75 p-3 shadow-sm ring-1 ring-gray-100/80 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-lg sm:min-h-[190px] sm:p-4 lg:min-h-[240px] lg:p-5">
-      <div className={`metric-tile-icon absolute left-3 top-3 flex h-10 w-10 items-start justify-start rounded-[15px] p-2.5 ${tone} opacity-95 transition-all duration-500 ease-[cubic-bezier(.2,.8,.2,1)] sm:left-4 sm:top-4 sm:h-12 sm:w-12 sm:p-3 sm:group-hover:left-3 sm:group-hover:top-3 sm:group-hover:h-[calc(100%-1.5rem)] sm:group-hover:w-[calc(100%-1.5rem)] sm:group-hover:rounded-[16px] sm:group-hover:p-5 sm:group-hover:opacity-100 sm:group-hover:shadow-inner`}>
-        <Icon size={20} className="shrink-0 transition-transform duration-500 sm:group-hover:scale-125" />
+    <div className="metric-tile group relative isolate flex min-h-[104px] min-w-0 flex-col justify-end overflow-hidden rounded-[18px] border border-white/80 bg-white/75 p-3 shadow-sm ring-1 ring-gray-100/80 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-lg active:-translate-y-0.5 sm:min-h-[178px] sm:p-4 lg:min-h-[220px] lg:p-5">
+      <div className={`metric-tile-icon pointer-events-none absolute left-3 top-3 z-0 flex h-10 w-10 items-start justify-start rounded-[15px] p-2.5 ${tone} opacity-95 transition-all duration-500 ease-[cubic-bezier(.2,.8,.2,1)] group-hover:left-2.5 group-hover:top-2.5 group-hover:h-[calc(100%-1.25rem)] group-hover:w-[calc(100%-1.25rem)] group-hover:rounded-[16px] group-hover:p-4 group-hover:opacity-100 group-hover:shadow-inner group-active:left-2.5 group-active:top-2.5 group-active:h-[calc(100%-1.25rem)] group-active:w-[calc(100%-1.25rem)] group-active:rounded-[16px] group-active:p-4 sm:left-4 sm:top-4 sm:h-12 sm:w-12 sm:p-3 sm:group-hover:left-3 sm:group-hover:top-3 sm:group-hover:h-[calc(100%-1.5rem)] sm:group-hover:w-[calc(100%-1.5rem)] sm:group-hover:p-5 sm:group-active:left-3 sm:group-active:top-3 sm:group-active:h-[calc(100%-1.5rem)] sm:group-active:w-[calc(100%-1.5rem)] sm:group-active:p-5`}>
+        <Icon size={20} className="shrink-0 transition-transform duration-500 group-hover:scale-125 group-active:scale-125" />
       </div>
-      <div className="relative z-10 min-w-0 transition-transform duration-300 sm:group-hover:translate-x-1">
+      <div className="relative z-10 min-w-0 transition-transform duration-300 group-hover:translate-x-0.5 group-active:translate-x-0.5 sm:group-hover:translate-x-1">
         <p className="text-[11px] font-black leading-4 text-gray-500">{label}</p>
-        <p className="mt-1 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-black leading-none tracking-tight text-gray-950 text-[clamp(1.65rem,9vw,2.25rem)] sm:mt-2 sm:text-[clamp(1.8rem,2vw,2.45rem)]">{value}</p>
+        <p className="mt-1 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-black leading-none tracking-tight text-gray-950 text-[clamp(1.55rem,8.5vw,2.25rem)] sm:mt-2 sm:text-[clamp(1.8rem,2vw,2.45rem)]">{value}</p>
         <p className="mt-1 text-[11px] font-bold leading-4 text-gray-500 sm:mt-2">{hint}</p>
       </div>
     </div>
@@ -159,39 +159,39 @@ function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
 
   return (
     <Shell data={data} cloud={cloud} studyDeckId={studyDeckId} wide>
-      <header className="mb-4 flex flex-col gap-3 sm:mb-5 lg:flex-row lg:items-end lg:justify-between">
+      <header className="mb-3 flex min-w-0 flex-col gap-3 sm:mb-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="mb-1 text-xs font-black uppercase tracking-[0.22em] text-blue-600">today desk</p>
           <h1 className="text-2xl font-black text-gray-950">今日学习台</h1>
           <p className="mt-1 text-sm text-gray-500">首页只回答一件事：现在该学什么。</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:flex-wrap">
           <button type="button" onClick={() => setToolboxOpen(true)} className="h-10 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">
             <Wrench size={15} className="mr-1 inline" />工具箱
           </button>
           <button type="button" onClick={() => navigate('/import')} className="h-10 rounded-xl bg-white px-4 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50">导入</button>
-          <button type="button" onClick={() => firstStudyDeckId && navigate(`/study/${firstStudyDeckId}`)} disabled={!firstStudyDeckId} className="h-10 rounded-xl bg-[#007aff] px-5 text-sm font-black text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300">
+          <button type="button" onClick={() => firstStudyDeckId && navigate(`/study/${firstStudyDeckId}`)} disabled={!firstStudyDeckId} className="col-span-2 h-10 rounded-xl bg-[#007aff] px-5 text-sm font-black text-white shadow-sm hover:bg-[#006ee6] disabled:bg-gray-300 sm:col-span-1">
             开始今日学习
           </button>
         </div>
       </header>
 
-      <section className="mb-4 overflow-hidden rounded-[22px] border border-white bg-white/90 shadow-sm sm:mb-5 sm:rounded-[28px]">
-        <div className="grid gap-0 lg:grid-cols-[1.05fr_1.1fr]">
-          <div className="border-b border-gray-100 p-4 sm:p-6 lg:border-b-0 lg:border-r">
-            <div className="flex items-start justify-between gap-5">
-              <div>
+      <section className="mb-4 w-full max-w-full overflow-hidden rounded-[22px] border border-white bg-white/90 shadow-sm sm:mb-5 sm:rounded-[28px]">
+        <div className="grid min-w-0 gap-0 lg:grid-cols-[1.05fr_1.1fr]">
+          <div className="min-w-0 border-b border-gray-100 p-4 sm:p-6 lg:border-b-0 lg:border-r">
+            <div className="flex min-w-0 items-start justify-between gap-3 sm:gap-5">
+              <div className="min-w-0">
                 <p className="mb-2 text-xs font-black text-blue-600">TODAY PLAN</p>
                 <h2 className="text-xl font-black text-gray-950 sm:text-2xl">今天先处理这三件事</h2>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-gray-500 sm:block">预计 {estimatedMinutes} 分钟：先清到期，再回收薄弱，最后少量推进新卡。</p>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-gray-500">预计 {estimatedMinutes} 分钟：先清到期，再回收薄弱，最后少量推进新卡。</p>
               </div>
-              <div className="shrink-0 rounded-[20px] border border-blue-100 bg-blue-50/80 px-4 py-3 text-center text-blue-900 shadow-inner ring-1 ring-white/80 sm:rounded-[24px] sm:px-5 sm:py-4">
+              <div className="hidden shrink-0 rounded-[20px] border border-blue-100 bg-blue-50/80 px-4 py-3 text-center text-blue-900 shadow-inner ring-1 ring-white/80 min-[430px]:block sm:rounded-[24px] sm:px-5 sm:py-4">
                 <p className="text-xs font-black text-blue-400">清空率</p>
                 <p className="text-2xl font-black tracking-tight sm:text-3xl">{clearRate}%</p>
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5 sm:gap-3 min-[1720px]:grid-cols-4">
+            <div className="home-metric-grid mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,136px),1fr))] gap-2 sm:mt-5 sm:grid-cols-2 sm:gap-3 min-[1720px]:grid-cols-4">
               <MetricTile icon={BookOpen} label="待复习" value={dueCards.length} hint="今天必须处理" tone="bg-red-100 text-red-600" />
               <MetricTile icon={AlertTriangle} label="仍模糊" value={weakCards.length} hint="优先回收" tone="bg-orange-100 text-orange-600" />
               <MetricTile icon={CheckCircle2} label="已完成" value={reviewedToday.length} hint="今日完成" tone="bg-green-100 text-green-700" />
@@ -199,7 +199,7 @@ function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
             </div>
           </div>
 
-          <div className="p-4 sm:p-6">
+          <div className="min-w-0 p-4 sm:p-6">
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 className="text-base font-black text-gray-950">今日推荐 5 个任务</h2>
               <button type="button" onClick={() => navigate('/map')} className="text-xs font-black text-blue-600 hover:text-blue-700">用知识拼图筛卡</button>

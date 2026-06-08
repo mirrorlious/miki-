@@ -82,10 +82,10 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
   const syncBusy = cloud.syncState === 'syncing' || cloud.syncState === 'connecting'
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-gray-950 font-sans">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f5f5f7] text-gray-950 font-sans">
       <AuthDialog open={authDialogOpen} cloud={cloud} onClose={() => setAuthDialogOpen(false)} />
       <header className="sticky top-0 z-40 border-b border-white/70 bg-[#f5f5f7]/90 backdrop-blur-xl">
-        <div className={`mx-auto flex ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} items-center justify-between gap-4 px-5 py-3`}>
+        <div className={`mx-auto flex w-full max-w-full ${shellWidth === 'narrow' ? 'sm:max-w-5xl' : shellWidth === 'full' ? 'sm:max-w-none' : (wide ? 'sm:max-w-[1400px]' : 'sm:max-w-6xl')} items-center justify-between gap-2 px-4 py-3 sm:gap-4 sm:px-5`}>
           <Link to="/decks" className="flex items-center gap-3 text-sm font-black text-gray-950">
             <span className="brand-logo" aria-label="mik!">
               <span className="brand-letter brand-letter-m">m</span>
@@ -110,7 +110,7 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
             ))}
           </nav>
 
-          <div className="flex min-w-0 items-center justify-end gap-2 text-xs text-gray-500">
+          <div className="flex min-w-0 shrink items-center justify-end gap-1 text-xs text-gray-500 sm:gap-2">
             <div className="flex min-w-0 items-center gap-1 rounded-2xl bg-white/85 px-1.5 py-1 shadow-sm ring-1 ring-white/80">
               <span className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-700" title={`今日待复习 ${summary.dueToday} 张`}>
                 <Layers3 size={13} className="text-gray-400" />
@@ -137,11 +137,11 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
                 onClick={cloud.onManualSync}
                 disabled={syncBusy}
                 title={syncTitle}
-                className={`grid h-8 w-[94px] grid-cols-[14px_1fr_auto] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 ${syncPillClass}`}
+                className={`grid h-8 w-[74px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 sm:w-[94px] sm:grid-cols-[14px_1fr_auto] ${syncPillClass}`}
               >
                 <Cloud size={14} className={syncIconClass} />
                 <span className="whitespace-nowrap">{syncLabel}</span>
-                <span className="font-mono text-[10px] font-black tabular-nums text-gray-400">{syncTimeLabel}</span>
+                <span className="hidden font-mono text-[10px] font-black tabular-nums text-gray-400 sm:inline">{syncTimeLabel}</span>
               </button>
             ) : (
               <span className={`grid h-8 w-[78px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black ${syncPillClass}`} title={syncTitle || cloud.message}>
@@ -149,7 +149,7 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
                 <span className="whitespace-nowrap">{syncLabel}</span>
               </span>
             )}
-            <Link to="/profile" className="flex h-8 max-w-[104px] min-w-[48px] items-center rounded-xl px-2 transition-colors hover:bg-gray-50" title={profile.nickname}>
+            <Link to="/profile" className="flex h-8 max-w-[64px] min-w-[34px] items-center rounded-xl px-2 transition-colors hover:bg-gray-50 sm:max-w-[104px] sm:min-w-[48px]" title={profile.nickname}>
               <span className="block truncate text-[11px] font-black text-gray-800">{profile.nickname}</span>
             </Link>
             {cloud.enabled && !cloud.user && (
@@ -168,14 +168,14 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
           </div>
         </div>
 
-        <nav className={`mx-auto flex ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} gap-2 overflow-x-auto px-5 pb-3 lg:hidden`}>
+        <nav className={`mx-auto flex w-full max-w-full ${shellWidth === 'narrow' ? 'sm:max-w-5xl' : shellWidth === 'full' ? 'sm:max-w-none' : (wide ? 'sm:max-w-[1400px]' : 'sm:max-w-6xl')} gap-2 overflow-x-auto px-4 pb-3 sm:px-5 lg:hidden`}>
           {navItems.map((item) => (
             <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
           ))}
         </nav>
       </header>
 
-      <main data-shell-width={shellWidth} className={`shell-main mx-auto ${shellWidth === 'narrow' ? 'max-w-5xl' : shellWidth === 'full' ? 'max-w-none' : (wide ? 'max-w-[1400px]' : 'max-w-6xl')} px-5 py-6`}>
+      <main data-shell-width={shellWidth} className={`shell-main mx-auto w-full max-w-full overflow-x-hidden ${shellWidth === 'narrow' ? 'sm:max-w-5xl' : shellWidth === 'full' ? 'sm:max-w-none' : (wide ? 'sm:max-w-[1400px]' : 'sm:max-w-6xl')} px-4 py-5 sm:px-5 sm:py-6`}>
         {children}
       </main>
     </div>

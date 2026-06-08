@@ -45,6 +45,11 @@
     @apply bg-gray-50 text-gray-800 antialiased selection:bg-blue-200;
     font-family: "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
   }
+
+  html, body, #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
 }
 
 @layer components {

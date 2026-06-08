@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 
 export default function ToolbarButton({ to, icon: Icon, label, disabled = false }) {
-  const baseClass = 'h-9 px-3 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors'
+  const baseClass = 'h-9 shrink-0 whitespace-nowrap px-3 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors'
 
   if (disabled) {
     return (
