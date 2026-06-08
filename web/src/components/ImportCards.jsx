@@ -26,7 +26,7 @@ function ImportCards({ data, onCreateCards, onSaveCardTemplate, onDeleteCardTemp
   const cardTemplates = useMemo(() => getCardTemplates(data), [data])
   const plainTemplates = useMemo(() => cardTemplates.filter((template) => template.mode !== 'html'), [cardTemplates])
   const htmlTemplates = useMemo(() => cardTemplates.filter((template) => template.mode === 'html'), [cardTemplates])
-  const visibleTemplates = templateMode === 'html' ? cardTemplates : plainTemplates
+  const visibleTemplates = templateMode === 'html' ? cardTemplates : (plainTemplates.length ? plainTemplates : cardTemplates)
   const selectedTemplateBase = visibleTemplates.find((template) => template.id === selectedTemplateId)
     ?? visibleTemplates[0]
     ?? cardTemplates[0]

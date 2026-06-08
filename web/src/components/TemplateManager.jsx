@@ -38,8 +38,8 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
   const previewCard = {
     id: 'template-preview-card',
     ...buildCardValueFromTemplate({
-      front: 'Front 示例',
-      back: 'Back 示例\n可以放答案、解析、例句或 HTML。',
+      front: '考点5：主犯（2010法学论述）',
+      back: '<strong>答案：</strong>主犯包括组织、领导犯罪集团进行犯罪活动的犯罪分子，或者在共同犯罪中起主要作用的犯罪分子。<br><br><strong>考点：</strong>共同犯罪 / 主犯<br><br><strong>解析：</strong>可在编辑区设置加粗、颜色、字号、项目编号和高亮。',
     }, previewTemplate),
   }
   const tabOptions = [

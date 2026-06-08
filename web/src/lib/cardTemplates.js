@@ -1114,10 +1114,231 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
   }
 })();`
 
+
+const QA_TEMPLATE_CSS = String.raw`.miki-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 30px 34px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 26px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: #0f172a;
+  font-family: "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+}
+
+.miki-card * {
+  box-sizing: border-box;
+}
+
+.miki-card-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin-bottom: 18px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #eaf3ff;
+  color: #0b78ff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.miki-question {
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 900;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+}
+
+.miki-front-hint {
+  margin-top: 24px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.45);
+  padding-top: 18px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.miki-answer {
+  margin-top: 18px;
+  border-radius: 22px;
+  background: #ffffff;
+  padding: 22px 24px;
+  color: #334155;
+  font-size: clamp(16px, 1.6vw, 19px);
+  line-height: 1.85;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.miki-answer strong,
+.miki-answer b {
+  color: #0b78ff;
+  font-weight: 900;
+}
+
+.miki-answer em,
+.miki-answer i {
+  color: #ea580c;
+}
+
+.miki-answer u {
+  color: #dc2626;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.miki-answer mark {
+  border-radius: 6px;
+  background: #fef3c7;
+  padding: 0 .18em;
+}
+
+.miki-answer ul,
+.miki-answer ol {
+  margin: .75em 0 .75em 1.35em;
+  padding: 0;
+}
+
+.miki-answer li {
+  margin: .28em 0;
+}
+
+.miki-answer blockquote {
+  margin: 1em 0;
+  border-left: 4px solid #22c55e;
+  border-radius: 12px;
+  background: #f0fdf4;
+  padding: 12px 16px;
+  color: #166534;
+  font-weight: 700;
+}
+
+.miki-front-preview {
+  margin-bottom: 16px;
+  border-left: 4px solid #0b78ff;
+  border-radius: 16px;
+  background: #eff6ff;
+  padding: 14px 16px;
+  color: #1e3a8a;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
+.miki-cloze {
+  display: inline-block;
+  border-radius: 12px;
+  background: #f1f5f9;
+  padding: 0 8px;
+  color: #64748b;
+  font-weight: 900;
+}
+
+.miki-note-card .miki-answer {
+  background: #fffbeb;
+}
+
+html.dark .miki-card {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(15, 23, 42, .96), rgba(30, 41, 59, .92));
+  color: #f8fafc;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
+}
+
+html.dark .miki-card-label {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+
+html.dark .miki-answer {
+  background: rgba(15, 23, 42, 0.78);
+  color: #cbd5e1;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .18);
+}
+
+html.dark .miki-front-preview {
+  background: rgba(37, 99, 235, .18);
+  color: #bfdbfe;
+}
+
+html.dark .miki-note-card .miki-answer {
+  background: rgba(120, 53, 15, .24);
+}
+`
+
+const QA_TEMPLATE_FRONT_CODE = String.raw`<article class="miki-card miki-qa-card">
+  <div class="miki-card-label">QUESTION</div>
+  <div class="miki-question">{{正面}}</div>
+  <div class="miki-front-hint">翻到背面查看答案、考点和解析</div>
+</article>`
+
+const QA_TEMPLATE_BACK_CODE = String.raw`<article class="miki-card miki-qa-card">
+  <div class="miki-card-label">ANSWER</div>
+  <div class="miki-front-preview">{{正面}}</div>
+  <div class="miki-answer">{{反面}}</div>
+</article>`
+
+const CLOZE_TEMPLATE_FRONT_CODE = String.raw`<article class="miki-card miki-cloze-card">
+  <div class="miki-card-label">CLOZE</div>
+  <div class="miki-question">{{正面}}</div>
+  <div class="miki-front-hint">重点空位可以用 <span class="miki-cloze">{{c1::内容}}</span> 标记</div>
+</article>`
+
+const CLOZE_TEMPLATE_BACK_CODE = String.raw`<article class="miki-card miki-cloze-card">
+  <div class="miki-card-label">REVEAL</div>
+  <div class="miki-front-preview">{{正面}}</div>
+  <div class="miki-answer">{{反面}}</div>
+</article>`
+
+const NOTE_TEMPLATE_FRONT_CODE = String.raw`<article class="miki-card miki-note-card">
+  <div class="miki-card-label">NOTE</div>
+  <div class="miki-question">{{正面}}</div>
+</article>`
+
+const NOTE_TEMPLATE_BACK_CODE = String.raw`<article class="miki-card miki-note-card">
+  <div class="miki-card-label">DETAIL</div>
+  <div class="miki-answer">{{反面}}</div>
+</article>`
+
 const SYSTEM_CARD_TEMPLATES = [
-  { id: 'qa', name: '问答题', description: '问题、答案。', mode: 'plain', builtIn: true },
-  { id: 'cloze', name: '填空题', description: '可用 {{c1::内容}} 做填空。', mode: 'plain', builtIn: true },
-  { id: 'note', name: '摘录题', description: '摘录、说明、补充。', mode: 'plain', builtIn: true },
+  {
+    id: 'qa',
+    name: '问答题',
+    description: '问题、答案、考点、解析的双面卡片。',
+    mode: 'html',
+    builtIn: true,
+    frontCode: QA_TEMPLATE_FRONT_CODE,
+    backCode: QA_TEMPLATE_BACK_CODE,
+    css: QA_TEMPLATE_CSS,
+    js: '',
+  },
+  {
+    id: 'cloze',
+    name: '填空题',
+    description: '适合挖空、定义、法条关键词。',
+    mode: 'html',
+    builtIn: true,
+    frontCode: CLOZE_TEMPLATE_FRONT_CODE,
+    backCode: CLOZE_TEMPLATE_BACK_CODE,
+    css: QA_TEMPLATE_CSS,
+    js: '',
+  },
+  {
+    id: 'note',
+    name: '摘录题',
+    description: '摘录、说明、补充、段落型笔记。',
+    mode: 'html',
+    builtIn: true,
+    frontCode: NOTE_TEMPLATE_FRONT_CODE,
+    backCode: NOTE_TEMPLATE_BACK_CODE,
+    css: QA_TEMPLATE_CSS,
+    js: '',
+  },
   {
     id: 'html',
     name: 'HTML',

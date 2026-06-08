@@ -10,14 +10,25 @@ function getCardSideText(card, side) {
   return side === 'front' ? card?.front : card?.back
 }
 
+function normalizeEditorRichText(value = '') {
+  return String(value ?? '')
+    // Repair the most common malformed snippets created while wrapping an existing selection.
+    // Example: <<strong>strong>文字</strong> -> <strong>文字</strong>
+    .replace(/<+([a-z][a-z0-9]*)>\1>/gi, '<$1>')
+    .replace(/<+\/([a-z][a-z0-9]*)>\/\1>/gi, '</$1>')
+    .replace(/<\s+(strong|em|u|s|mark|span|blockquote|ul|ol|li)(\s|>)/gi, '<$1$2')
+    .replace(/<\/\s+(strong|em|u|s|mark|span|blockquote|ul|ol|li)\s*>/gi, '</$1>')
+}
+
 function looksLikeHtml(value = '') {
-  return /<\/?[a-z][\s\S]*>/i.test(String(value))
+  return /<\/?[a-z][\s\S]*>/i.test(normalizeEditorRichText(value))
 }
 
 function htmlToPlainText(html = '') {
-  if (typeof document === 'undefined') return String(html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  const normalized = normalizeEditorRichText(html)
+  if (typeof document === 'undefined') return String(normalized).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
   const element = document.createElement('div')
-  element.innerHTML = String(html)
+  element.innerHTML = String(normalized)
   return (element.textContent || element.innerText || '').replace(/\s+/g, ' ').trim()
 }
 
@@ -52,7 +63,7 @@ function scopeAnkiCss(css = '', scopeSelector = '.anki-card-content') {
 }
 
 function sanitizeCardHtml(html) {
-  const normalizedHtml = String(html ?? '')
+  const normalizedHtml = normalizeEditorRichText(html)
     .replace(/<!doctype[^>]*>/gi, '')
     .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
     .replace(/<\/?(?:template|html|body)[^>]*>/gi, '')
@@ -127,4 +138,4 @@ function buildCardValueFromTemplate(form, template) {
   }
 }
 
-export { getCardSideHtml, getCardSideText, looksLikeHtml, htmlToPlainText, escapeHtmlText, makeTemplateFieldHtml, applyCardTemplateCode, buildCardValueFromTemplate, sanitizeCssScopeId, scopeAnkiCss, sanitizeCardHtml, isScriptCallText }
+export { getCardSideHtml, getCardSideText, looksLikeHtml, htmlToPlainText, escapeHtmlText, makeTemplateFieldHtml, applyCardTemplateCode, buildCardValueFromTemplate, sanitizeCssScopeId, scopeAnkiCss, sanitizeCardHtml, isScriptCallText, normalizeEditorRichText }
