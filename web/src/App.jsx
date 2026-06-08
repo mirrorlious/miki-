@@ -20,6 +20,7 @@ import ImportCards from './components/ImportCards.jsx'
 import Browse from './components/BrowsePage.jsx'
 import KnowledgeMap from './components/KnowledgeMap.jsx'
 import Profile from './components/Profile.jsx'
+import FocusLogDayPage from './components/FocusLogDayPage.jsx'
 import DOMPurify from 'dompurify'
 import {
   AlignLeft,
@@ -1231,6 +1232,7 @@ export default function App() {
         <Route path="/organize" element={<Organize data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/profile" element={<Profile data={appData} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />
+        <Route path="/focus-log" element={<FocusLogDayPage data={appData} cloud={cloud} studyDeckId={studyDeckId} />} />
         <Route path="/cards/new/:deckId" element={<AddCard data={appData} onCreateCard={createCard} onUpdateCard={updateCard} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/cards/edit/:cardId" element={<AddCard data={appData} onCreateCard={createCard} onUpdateCard={updateCard} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/study/:deckId" element={<Study data={appData} onReviewCard={reviewCard} onUpdateCardMeta={updateCardMeta} studyDeckId={studyDeckId} cloud={cloud} />} />

@@ -18,6 +18,7 @@ import { isCardDue, isNewCard } from '../lib/browseUtils.js'
 import { getDeckPath, sortDecksByPath } from '../lib/deckUtils.js'
 import Shell from './Shell.jsx'
 import LearningOverviewPanel from './LearningOverviewPanel.jsx'
+import StudyMonthHeatmap from './StudyMonthHeatmap.jsx'
 
 function toLocalDateKey(value) {
   if (!value) return ''
@@ -386,17 +387,6 @@ function Dashboard({ data, onOpenCreateDeck, studyDeckId, cloud }) {
               { label: '已掌握', value: masteredCards.length, color: '#20c997' },
             ]}
           />
-          <div className="mt-5 rounded-2xl bg-gray-50/70 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] font-black text-gray-400">35 天活跃色块</p>
-              <span className="text-[10px] font-black text-gray-300">真实复习记录</span>
-            </div>
-            <div className="grid grid-cols-7 gap-1.5">
-              {trend35.map((day) => (
-                <div key={day.date} title={`${day.date}：${day.count} 张`} className={`aspect-square rounded-md ${getHeatLevelClass(day.count)}`} />
-              ))}
-            </div>
-          </div>
         </div>
       </section>
 
@@ -441,23 +431,7 @@ function Dashboard({ data, onOpenCreateDeck, studyDeckId, cloud }) {
       </section>
 
       <section className="mb-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)]">
-        <div className="rounded-2xl border border-white bg-white/90 p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-black text-gray-950">学习热力图</h2>
-              <p className="text-xs font-bold text-gray-400">最近 35 天复习活跃度。保留一小块一小块的色块视图。</p>
-            </div>
-            <CalendarDays size={18} className="text-blue-500" />
-          </div>
-          <div className="grid grid-cols-7 gap-2">
-            {trend35.map((day) => (
-              <div key={day.date} title={`${day.date}：${day.count} 张`} className={`aspect-square rounded-lg transition hover:scale-105 ${getHeatLevelClass(day.count)}`} />
-            ))}
-          </div>
-          <div className="mt-3 flex items-center justify-end gap-1 text-[10px] font-black text-gray-300">
-            少 <span className="h-3 w-3 rounded bg-gray-100" /><span className="h-3 w-3 rounded bg-green-100" /><span className="h-3 w-3 rounded bg-green-300" /><span className="h-3 w-3 rounded bg-green-500" /> 多
-          </div>
-        </div>
+        <StudyMonthHeatmap data={data} title="学习月历" />
 
         <div className="rounded-2xl border border-white bg-white/90 p-5 shadow-sm">
           <h2 className="mb-4 text-sm font-black text-gray-950">薄弱来源 Top 5</h2>
