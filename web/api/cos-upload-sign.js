@@ -32,6 +32,14 @@ function cleanPart(value = '') {
     .slice(0, 80) || 'image'
 }
 
+function cleanPath(value = '') {
+  return String(value)
+    .split(/[\\/]+/)
+    .map(cleanPart)
+    .filter(Boolean)
+    .join('/') || 'miki/user-media'
+}
+
 function extFromName(filename = '', contentType = '') {
   const match = String(filename).toLowerCase().match(/\.([a-z0-9]{2,8})$/)
   if (match?.[1]) return match[1]
@@ -80,7 +88,7 @@ export default async function handler(req, res) {
   const bucket = process.env.TENCENT_COS_BUCKET || 'miki-image-1258353277'
   const region = process.env.TENCENT_COS_REGION || 'ap-chongqing'
   const publicBase = (process.env.TENCENT_COS_PUBLIC_BASE || `https://${bucket}.cos.${region}.myqcloud.com`).replace(/\/$/, '')
-  const prefix = cleanPart(process.env.TENCENT_COS_UPLOAD_PREFIX || 'miki/user-media')
+  const prefix = cleanPath(process.env.TENCENT_COS_UPLOAD_PREFIX || 'miki/user-media')
 
   if (!secretId || !secretKey) return sendJson(res, 500, { message: 'COS 上传密钥未配置。' })
 
