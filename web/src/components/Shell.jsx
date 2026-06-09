@@ -1,11 +1,12 @@
 import { useState, useContext } from 'react'
 import { Link } from 'react-router-dom'
-import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch } from 'lucide-react'
+import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch, BookOpen, X } from 'lucide-react'
 import { stats, STORAGE_KEY } from '../data.js'
 import { ThemeContext } from '../lib/theme.js'
 import { getProfile } from '../lib/profile.js'
 import ToolbarButton from './ToolbarButton.jsx'
 import AuthDialog from './AuthDialog.jsx'
+import WebChoiceBank from './WebChoiceBank.jsx'
 import './Shell.css'
 
 const SHELL_WIDTH_STORAGE_KEY = `${STORAGE_KEY}:shellWidth`
@@ -60,11 +61,13 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
       : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
+  const [choiceBankOpen, setChoiceBankOpen] = useState(false)
   const [shellWidth, setShellWidth] = useState(() => {
     try { return localStorage.getItem(SHELL_WIDTH_STORAGE_KEY) || (wide ? 'wide' : 'normal') }
     catch { return wide ? 'wide' : 'normal' }
   })
   const isDarkTheme = theme === 'dark'
+  const signedIn = Boolean(cloud.user)
 
   const navItems = [
     { to: '/decks', icon: LayoutDashboard, label: '卡组' },
@@ -89,10 +92,36 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
   }
 
   const syncBusy = cloud.syncState === 'syncing' || cloud.syncState === 'connecting'
+  const compactActionBase = 'group/nav h-9 shrink-0 overflow-hidden rounded-lg text-sm font-bold flex items-center gap-2 transition-all duration-300 ease-out w-9 px-2.5 hover:w-[76px] focus-visible:w-[76px]'
+  const compactActionLabel = 'inline-block max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-300 ease-out group-hover/nav:max-w-[48px] group-hover/nav:opacity-100 group-focus-visible/nav:max-w-[48px] group-focus-visible/nav:opacity-100'
+  const compactActionIcon = 'shrink-0 transition-transform duration-300 ease-out group-hover/nav:-rotate-6 group-focus-visible/nav:-rotate-6'
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f5f5f7] text-gray-950 font-sans">
       <AuthDialog open={authDialogOpen} cloud={cloud} onClose={() => setAuthDialogOpen(false)} />
+      {signedIn && choiceBankOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/35 p-4 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
+          <div className="mx-auto flex h-full max-h-[calc(100vh-2rem)] w-full max-w-[1480px] flex-col overflow-hidden rounded-[28px] bg-[#f5f5f7] shadow-2xl ring-1 ring-black/5 sm:max-h-[calc(100vh-3rem)]">
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/70 bg-white/80 px-5 backdrop-blur-xl">
+              <div>
+                <div className="text-[11px] font-black text-[#007aff]">内置题库</div>
+                <div className="text-sm font-black text-gray-950">27法硕 ZH2000 题库</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChoiceBankOpen(false)}
+                className="grid h-9 w-9 place-items-center rounded-full bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-900"
+                aria-label="关闭题库"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              <WebChoiceBank isAuthenticated={signedIn} />
+            </div>
+          </div>
+        </div>
+      )}
       <header className="sticky top-0 z-40 border-b border-white/70 bg-[#f5f5f7]/90 backdrop-blur-xl">
         <div className={`mx-auto flex w-full max-w-full ${shellWidth === 'narrow' ? 'sm:max-w-5xl' : shellWidth === 'full' ? 'sm:max-w-none' : (wide ? 'sm:max-w-[1400px]' : 'sm:max-w-6xl')} items-center justify-between gap-2 px-4 py-3 sm:gap-4 sm:px-5`}>
           <Link to="/decks" className="flex items-center gap-3 text-sm font-black text-gray-950">
@@ -117,6 +146,18 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
             {navItems.map((item) => (
               <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} compactExpand />
             ))}
+            {signedIn && (
+              <button
+                type="button"
+                onClick={() => setChoiceBankOpen(true)}
+                title="题库"
+                aria-label="题库"
+                className={`${compactActionBase} text-gray-500 hover:bg-white/70 hover:text-gray-900`}
+              >
+                <BookOpen size={16} className={compactActionIcon} />
+                <span className={compactActionLabel}>题库</span>
+              </button>
+            )}
           </nav>
 
           <div className="flex min-w-0 shrink items-center justify-end gap-1 text-xs text-gray-500 sm:gap-2">
@@ -184,6 +225,16 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
           {navItems.map((item) => (
             <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
           ))}
+          {signedIn && (
+            <button
+              type="button"
+              onClick={() => setChoiceBankOpen(true)}
+              className="h-9 shrink-0 whitespace-nowrap px-3 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors text-gray-500 hover:bg-white/70 hover:text-gray-900"
+            >
+              <BookOpen size={16} />
+              题库
+            </button>
+          )}
         </nav>
       </header>
 
