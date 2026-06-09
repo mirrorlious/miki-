@@ -1,11 +1,19 @@
 const QUIZ_CHOICE_FRONT_CODE = String.raw`<div id="side-flag" data-side="front"></div>
 <div id="raw-question" class="raw-data">{{正面}}</div>
-<div id="raw-back" class="raw-data">{{反面}}</div>
+<div id="raw-question-alt" class="raw-data">{{Front}}</div>
+<div id="raw-content" class="raw-data">{{内容}}</div>
+<div id="raw-content-alt" class="raw-data">{{正文}}</div>
 <div id="quiz-card"></div>`
+
 const QUIZ_CHOICE_BACK_CODE = String.raw`<div id="side-flag" data-side="back"></div>
 <div id="raw-question" class="raw-data">{{正面}}</div>
+<div id="raw-question-alt" class="raw-data">{{Front}}</div>
+<div id="raw-content" class="raw-data">{{内容}}</div>
+<div id="raw-content-alt" class="raw-data">{{正文}}</div>
 <div id="raw-back" class="raw-data">{{反面}}</div>
+<div id="raw-back-alt" class="raw-data">{{Back}}</div>
 <div id="quiz-card"></div>`
+
 const QUIZ_CHOICE_CSS = String.raw`.card {
   background: #fff;
   color: #111;
@@ -19,7 +27,7 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
 .quiz-card {
   max-width: 1160px;
   margin: 0 auto;
-  padding: 18px 38px 26px;
+  padding: 18px 38px 30px;
   box-sizing: border-box;
 }
 
@@ -30,12 +38,15 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
 
 .control-pill {
   display: inline-block;
+  border: 0;
   background: #46c96f;
   color: #fff;
   padding: 9px 22px;
   border-radius: 999px;
+  font-family: inherit;
   font-weight: bold;
   font-size: 13px;
+  cursor: pointer;
   box-shadow: 0 5px 12px rgba(70, 201, 111, 0.25);
 }
 
@@ -44,6 +55,7 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
   font-weight: bold;
   line-height: 1.8;
   margin-bottom: 54px;
+  white-space: pre-wrap;
 }
 
 .q-type {
@@ -53,12 +65,14 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
 }
 
 .options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
 }
 
 .option {
+  display: block;
+  width: 100%;
   border: 1.4px solid #111;
   border-radius: 4px;
   padding: 10px 18px;
@@ -82,7 +96,13 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
   margin-right: 8px;
 }
 
-.option.selected,
+.option.selected {
+  background: #0b8cff;
+  color: #fff;
+  border-color: #006fd1;
+  font-weight: bold;
+}
+
 .option.correct {
   background: #0b8cff;
   color: #fff;
@@ -102,7 +122,7 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
 }
 
 .tag-row {
-  margin-top: 10px;
+  margin-top: 14px;
 }
 
 .tag {
@@ -126,51 +146,75 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
   font-size: 14px;
 }
 
-.answer-box {
-  margin-top: 22px;
-  padding: 14px 16px;
-  background: #f6faff;
-  border-left: 4px solid #0b8cff;
-  border-radius: 4px;
-  font-size: 15px;
-  line-height: 1.7;
-}
-
-.answer-title {
+#live-time {
   color: #0b8cff;
   font-weight: bold;
-  margin-bottom: 6px;
-}
-
-.analysis {
-  color: #222;
 }
 
 .stats-row {
-  margin-top: 42px;
+  margin: 42px auto 0;
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
   text-align: center;
+  max-width: 960px;
+  width: 100%;
+  overflow: visible;
 }
 
 .stat-item {
   min-width: 0;
+  padding: 10px 8px 9px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.86);
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.stat-item-mistake {
+  grid-column: span 2;
 }
 
 .stat-value {
-  font-size: 17px;
-  font-weight: bold;
+  display: block;
+  max-width: 100%;
+  font-size: 15px;
+  font-weight: 900;
   color: #555;
-  white-space: nowrap;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-break: anywhere;
+  line-height: 1.25;
+  min-height: 1.25em;
 }
 
 .stat-label {
-  margin-top: 14px;
-  font-size: 15px;
-  font-weight: bold;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 800;
   color: #60656f;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+@media (max-width: 720px) {
+  .stats-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stat-item-mistake {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 430px) {
+  .stats-row {
+    grid-template-columns: 1fr;
+  }
+  .stat-item-mistake {
+    grid-column: span 1;
+  }
 }
 
 .stat-blue {
@@ -185,21 +229,25 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
   color: #ff3333;
 }
 
-.control-pill {
-  border: 0;
-  cursor: pointer;
-  font-family: inherit;
+.answer-box {
+  margin-top: 24px;
+  padding: 16px 18px;
+  background: #f6faff;
+  border-left: 4px solid #0b8cff;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1.75;
 }
 
-.options {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 10px !important;
+.answer-title {
+  color: #0b8cff;
+  font-weight: bold;
+  margin-bottom: 6px;
 }
 
-.option {
-  display: block;
-  width: 100%;
+.analysis {
+  color: #222;
+  white-space: pre-wrap;
 }
 
 .analysis-toggle {
@@ -209,6 +257,7 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
   border-radius: 6px;
   background: #fff;
   color: #0b8cff;
+  font-family: inherit;
   font-weight: bold;
   cursor: pointer;
 }
@@ -340,30 +389,191 @@ const QUIZ_CHOICE_CSS = String.raw`.card {
   box-shadow: none !important;
 }
 
+.option.locked {
+  cursor: default;
+}
+
+.quiz-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 100000;
+  transform: translate(-50%, 10px);
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: bold;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+.quiz-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 @media (max-width: 900px) {
+  .quiz-card {
+    padding: 14px 16px 24px;
+  }
+
+  .top-area {
+    margin-bottom: 36px;
+  }
+
+  .question {
+    font-size: 15px;
+    margin-bottom: 36px;
+  }
+
+  .option {
+    font-size: 15px;
+    padding: 10px 14px;
+  }
+
   .stats-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px 10px;
+    grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+    gap: 10px;
+    margin-top: 30px;
+  }
+
+  .stat-item {
+    padding: 8px 5px 7px;
+    border-radius: 10px;
   }
 
   .stat-value {
-    font-size: 15px;
+    font-size: 14px;
   }
 
   .stat-label {
-    font-size: 13px;
-    margin-top: 8px;
+    font-size: 12px;
+    margin-top: 6px;
   }
 
   .cc-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-}
-`
-const QUIZ_CHOICE_JS = String.raw`(function () {
-  var RECORDS_KEY = "ANKI_QUIZ_RECORDS_CC_V1";
-  var SETTINGS_KEY = "ANKI_QUIZ_SETTINGS_CC_V1";
+
+  .cc-panel {
+    padding: 24px 20px 22px;
+  }
+}`
+
+const ANKI_PERSISTENCE_JS = String.raw`if (typeof(window.Persistence) === 'undefined') {
+  var _persistenceKey = 'github.com/SimonLammer/anki-persistence/';
+  var _defaultKey = '_default';
+  window.Persistence_sessionStorage = function() { // used in android, iOS, web
+    var isAvailable = false;
+    try {
+      if (typeof(window.sessionStorage) === 'object') {
+        isAvailable = true;
+        this.clear = function() {
+          for (var i = 0; i < sessionStorage.length; i++) {
+            var k = sessionStorage.key(i);
+            if (k.indexOf(_persistenceKey) == 0) {
+              sessionStorage.removeItem(k);
+              i--;
+            }
+          };
+        };
+        this.setItem = function(key, value) {
+          if (value == undefined) {
+            value = key;
+            key = _defaultKey;
+          }
+          sessionStorage.setItem(_persistenceKey + key, JSON.stringify(value));
+        };
+        this.getItem = function(key) {
+          if (key == undefined) {
+            key = _defaultKey;
+          }
+          return JSON.parse(sessionStorage.getItem(_persistenceKey + key));
+        };
+        this.removeItem = function(key) {
+          if (key == undefined) {
+            key = _defaultKey;
+          }
+          sessionStorage.removeItem(_persistenceKey + key);
+        };
+        this.getAllKeys = function () {
+          var keys = [];
+          var prefixedKeys = Object.keys(sessionStorage);
+          for (var i = 0; i < prefixedKeys.length; i++) {
+            var k = prefixedKeys[i];
+            if (k.indexOf(_persistenceKey) == 0) {
+              keys.push(k.substring(_persistenceKey.length, k.length));
+            }
+          };
+          return keys.sort()
+        }
+      }
+    } catch(err) {}
+    this.isAvailable = function() {
+      return isAvailable;
+    };
+  };
+  window.Persistence_windowKey = function(persistentKey) { // used in windows, linux, mac
+    var obj = window[persistentKey];
+    var isAvailable = false;
+    if (typeof(obj) === 'object') {
+      isAvailable = true;
+      this.clear = function() {
+        obj[_persistenceKey] = {};
+      };
+      this.setItem = function(key, value) {
+        if (value == undefined) {
+          value = key;
+          key = _defaultKey;
+        }
+        obj[_persistenceKey][key] = value;
+      };
+      this.getItem = function(key) {
+        if (key == undefined) {
+          key = _defaultKey;
+        }
+        return obj[_persistenceKey][key] == undefined ? null : obj[_persistenceKey][key];
+      };
+      this.removeItem = function(key) {
+        if (key == undefined) {
+          key = _defaultKey;
+        }
+        delete obj[_persistenceKey][key];
+      };
+      this.getAllKeys = function () {
+        return Object.keys(obj[_persistenceKey]);
+      }
+
+      if (obj[_persistenceKey] == undefined) {
+        this.clear();
+      }
+    }
+    this.isAvailable = function() {
+      return isAvailable;
+    };
+  };
+  window.Persistence = new Persistence_sessionStorage(); // android, iOS, web
+  if (!Persistence.isAvailable()) {
+    window.Persistence = new Persistence_windowKey("py"); // windows, mac (2.0)
+  }
+  if (!Persistence.isAvailable()) {
+    var titleStartIndex = window.location.toString().indexOf('title'); // if titleStartIndex > 0, window.location is useful
+    var titleContentIndex = window.location.toString().indexOf('main', titleStartIndex);
+    if (titleStartIndex > 0 && titleContentIndex > 0 && (titleContentIndex - titleStartIndex) < 10) {
+      window.Persistence = new Persistence_windowKey("qt"); // linux, mac (2.1)
+    }
+  }
+}`
+
+const QUIZ_CHOICE_JS = ANKI_PERSISTENCE_JS + "\n" + String.raw`(function () {
+  var RECORDS_KEY = "ANKI_QUIZ_RECORDS_CC_V8";
+  var SETTINGS_KEY = "ANKI_QUIZ_SETTINGS_CC_V8";
   var MAX_RECORDS = 3000;
+  var TIMER_KEY_PREFIX = "ANKI_QUIZ_CHAPTER_TIMER_CC_V8";
+  var timerId = null;
 
   var DEFAULT_SETTINGS = {
     animation: true,
@@ -373,10 +583,37 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     showAnalysis: true
   };
 
-  function getText(id) {
+  function getRaw(id) {
     var el = document.getElementById(id);
     if (!el) return "";
-    return (el.innerText || el.textContent || "").trim();
+
+    var html = el.innerHTML || "";
+    var text = el.textContent || "";
+    var value = String(html || text || "").trim();
+
+    if (!value) return "";
+    if (/^\{\{.*\}\}$/.test(value)) return "";
+    if (value === "Front" || value === "Back") return "";
+
+    return value;
+  }
+
+  function stripHtml(s) {
+    var div = document.createElement("div");
+    div.innerHTML = String(s || "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<\/div>/gi, "\n");
+    return div.textContent || div.innerText || "";
+  }
+
+  function cleanText(s) {
+    return stripHtml(s)
+      .replace(/\r/g, "\n")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   function escapeHtml(s) {
@@ -391,41 +628,90 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     });
   }
 
-  function cleanText(s) {
-    return String(s || "")
-      .replace(/\r/g, "\n")
-      .replace(/\u00a0/g, " ")
-      .replace(/[ \t]+/g, " ")
-      .trim();
+  function hasAnswer(raw) {
+    return /(?:答案|正确答案)\s*[:：]\s*[A-H]{1,8}/i.test(cleanText(raw));
+  }
+
+  function looksLikeQuestion(raw) {
+    var t = cleanText(raw);
+    return /(^|\n|\s)[A-H]\s*[\.．、:：]\s*/i.test(t);
+  }
+
+  function getBestQuestionRaw() {
+    var candidates = [
+      getRaw("raw-question"),
+      getRaw("raw-question-alt")
+    ];
+
+    for (var i = 0; i < candidates.length; i++) {
+      if (looksLikeQuestion(candidates[i])) return candidates[i];
+    }
+
+    return candidates[0] || candidates[1] || "";
+  }
+
+  function getBestBackRaw() {
+    var candidates = [
+      getRaw("raw-back"),
+      getRaw("raw-back-alt")
+    ];
+
+    for (var i = 0; i < candidates.length; i++) {
+      if (hasAnswer(candidates[i])) return candidates[i];
+    }
+
+    return candidates[0] || candidates[1] || "";
+  }
+
+  function splitByAnswer(raw) {
+    var t = cleanText(raw);
+    var answerIndex = t.search(/(?:答案|正确答案)\s*[:：]\s*[A-H]{1,8}/i);
+
+    if (answerIndex !== -1) {
+      return {
+        front: t.slice(0, answerIndex).trim(),
+        back: t.slice(answerIndex).trim()
+      };
+    }
+
+    return {
+      front: t,
+      back: ""
+    };
   }
 
   function splitCombinedQuestion(rawQuestion, rawBack) {
     rawQuestion = String(rawQuestion || "");
     rawBack = String(rawBack || "");
 
-    if (cleanText(rawBack)) {
+    var qHasQuestion = looksLikeQuestion(rawQuestion);
+    var qHasAnswer = hasAnswer(rawQuestion);
+    var bHasQuestion = looksLikeQuestion(rawBack);
+    var bHasAnswer = hasAnswer(rawBack);
+
+    if (qHasQuestion && qHasAnswer) {
+      return splitByAnswer(rawQuestion);
+    }
+
+    if (qHasQuestion && bHasAnswer) {
       return {
         front: rawQuestion,
         back: rawBack
       };
     }
 
-    var tabIndex = rawQuestion.indexOf("\t");
-
-    if (tabIndex !== -1) {
-      return {
-        front: rawQuestion.slice(0, tabIndex),
-        back: rawQuestion.slice(tabIndex + 1)
-      };
+    if (bHasQuestion && bHasAnswer) {
+      return splitByAnswer(rawBack);
     }
 
-    var answerIndex = rawQuestion.search(/(?:答案|正确答案)\s*[:：]\s*[A-D]{1,4}/i);
-
-    if (answerIndex !== -1) {
-      return {
-        front: rawQuestion.slice(0, answerIndex),
-        back: rawQuestion.slice(answerIndex)
-      };
+    if (rawQuestion.indexOf("\t") !== -1) {
+      var parts = rawQuestion.split("\t");
+      if (parts.length >= 2) {
+        return {
+          front: parts[0],
+          back: parts.slice(1).join("\t")
+        };
+      }
     }
 
     return {
@@ -440,7 +726,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
 
     for (var i = 0; i < s.length; i++) {
       var ch = s.charAt(i);
-      if (/[A-D]/.test(ch) && arr.indexOf(ch) === -1) {
+      if (/[A-H]/.test(ch) && arr.indexOf(ch) === -1) {
         arr.push(ch);
       }
     }
@@ -461,23 +747,28 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
       type: ""
     };
 
-    var typeMatch = raw.match(/【\s*(单选|多选)\s*】|题型\s*[:：]\s*(单选|多选)/);
+    var typeMatch = raw.match(/【\s*(单选|多选)\s*】|题型\s*[:：]\s*(单选|多选)|（\s*(单选|多选)\s*）|\(\s*(单选|多选)\s*\)/);
     if (typeMatch) {
-      data.type = typeMatch[1] || typeMatch[2] || "";
+      data.type = typeMatch[1] || typeMatch[2] || typeMatch[3] || typeMatch[4] || "";
     }
 
     raw = raw.replace(/【\s*(单选|多选)\s*】/g, "");
     raw = raw.replace(/题型\s*[:：]\s*(单选|多选)/g, "");
     raw = raw.replace(/^题干\s*[:：]\s*/i, "");
 
-    var optionRegex = /([A-D])\s*[\.．、:：]\s*/gi;
+    var answerIndex = raw.search(/(?:答案|正确答案)\s*[:：]\s*[A-H]{1,8}/i);
+    if (answerIndex !== -1) {
+      raw = raw.slice(0, answerIndex).trim();
+    }
+
+    var optionRegex = /(^|\n|\s)([A-H])\s*[\.．、:：]\s*/gi;
     var matches = [];
     var m;
 
     while ((m = optionRegex.exec(raw)) !== null) {
       matches.push({
-        key: m[1].toUpperCase(),
-        index: m.index,
+        key: m[2].toUpperCase(),
+        index: m.index + m[1].length,
         end: optionRegex.lastIndex
       });
     }
@@ -509,12 +800,12 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
       type: ""
     };
 
-    var typeMatch = raw.match(/【\s*(单选|多选)\s*】|题型\s*[:：]\s*(单选|多选)/);
+    var typeMatch = raw.match(/【\s*(单选|多选)\s*】|题型\s*[:：]\s*(单选|多选)|（\s*(单选|多选)\s*）|\(\s*(单选|多选)\s*\)/);
     if (typeMatch) {
-      data.type = typeMatch[1] || typeMatch[2] || "";
+      data.type = typeMatch[1] || typeMatch[2] || typeMatch[3] || typeMatch[4] || "";
     }
 
-    var answerMatch = raw.match(/(?:答案|正确答案)\s*[:：]\s*([A-D]{1,4})/i);
+    var answerMatch = raw.match(/(?:答案|正确答案)\s*[:：]\s*([A-H]{1,8})/i);
     if (answerMatch) {
       data.answer = normalizeAnswer(answerMatch[1]);
     }
@@ -544,6 +835,23 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
   }
 
   function makeKey(q, b) {
+    // 正反面必须使用同一个 key。不能把答案拼进去：正面通常读不到答案，
+    // 否则正面保存到 question|，背面读取 question|A，就会出现“你的选择：暂无”。
+    var stable = [
+      q.question || "",
+      "A:" + (q.A || ""),
+      "B:" + (q.B || ""),
+      "C:" + (q.C || ""),
+      "D:" + (q.D || ""),
+      "E:" + (q.E || ""),
+      "F:" + (q.F || ""),
+      "G:" + (q.G || ""),
+      "H:" + (q.H || "")
+    ].join("|");
+    return "anki_quiz_" + hashText(stable);
+  }
+
+  function makeLegacyKey(q, b) {
     return "anki_quiz_" + hashText((q.question || "") + "|" + (b.answer || ""));
   }
 
@@ -592,28 +900,66 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     } catch (e) {}
   }
 
-  function readAttempt(storeKey) {
+  function getPersistenceStore() {
     try {
-      return JSON.parse(sessionStorage.getItem(storeKey + "_attempt") || "null");
+      if (window.Persistence && typeof window.Persistence.isAvailable === "function" && window.Persistence.isAvailable()) {
+        return window.Persistence;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function readAttempt(storeKey) {
+    var key = storeKey + "_attempt";
+    var store = getPersistenceStore();
+
+    if (store) {
+      try {
+        var value = store.getItem(key);
+        if (value) return value;
+      } catch (e) {}
+    }
+
+    try {
+      return JSON.parse(sessionStorage.getItem(key) || "null");
     } catch (e) {
       return null;
     }
   }
 
   function saveAttempt(storeKey, state) {
+    var key = storeKey + "_attempt";
+    var store = getPersistenceStore();
+
+    if (store) {
+      try {
+        store.setItem(key, state);
+      } catch (e) {}
+    }
+
     try {
-      sessionStorage.setItem(storeKey + "_attempt", JSON.stringify(state));
+      sessionStorage.setItem(key, JSON.stringify(state));
     } catch (e) {}
   }
 
   function removeAttempt(storeKey) {
+    var key = storeKey + "_attempt";
+    var store = getPersistenceStore();
+
+    if (store) {
+      try {
+        store.removeItem(key);
+      } catch (e) {}
+    }
+
     try {
-      sessionStorage.removeItem(storeKey + "_attempt");
+      sessionStorage.removeItem(key);
     } catch (e) {}
   }
 
   function createAttempt(storeKey) {
     var state = {
+      attemptId: storeKey + "_" + Date.now(),
       startedAt: Date.now(),
       selected: "",
       recorded: false,
@@ -638,8 +984,8 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     return a;
   }
 
-  function getOptionKeys(q, settings, state, storeKey, side) {
-    var keys = ["A", "B", "C", "D"].filter(function (k) {
+  function getOptionKeys(q, settings, state, storeKey) {
+    var keys = ["A", "B", "C", "D", "E", "F", "G", "H"].filter(function (k) {
       return !!q[k];
     });
 
@@ -651,7 +997,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
       });
     }
 
-    if (side === "front" && state) {
+    if (state) {
       state.order = shuffle(keys);
       saveAttempt(storeKey, state);
       return state.order;
@@ -687,6 +1033,54 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
   function formatTime(ms) {
     var sec = Math.max(0, Math.floor((ms || 0) / 1000));
     return Math.floor(sec / 60) + "分" + (sec % 60) + "秒";
+  }
+
+  function getChapterTimerKey() {
+    var path = "";
+    try {
+      path = String(window.location && (window.location.pathname + window.location.search) || "study");
+    } catch (e) {
+      path = "study";
+    }
+    return TIMER_KEY_PREFIX + "_" + hashText(path);
+  }
+
+  function getChapterStartedAt() {
+    var key = getChapterTimerKey();
+    var now = Date.now();
+    try {
+      var saved = Number(sessionStorage.getItem(key) || 0);
+      if (saved > 0) return saved;
+      sessionStorage.setItem(key, String(now));
+    } catch (e) {}
+    return now;
+  }
+
+  function getChapterElapsedMs() {
+    return Date.now() - getChapterStartedAt();
+  }
+
+  function resetChapterTimer() {
+    try {
+      sessionStorage.setItem(getChapterTimerKey(), String(Date.now()));
+    } catch (e) {}
+  }
+
+  function showToast(message) {
+    try {
+      var old = document.getElementById("quiz-toast");
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      var el = document.createElement("div");
+      el.id = "quiz-toast";
+      el.className = "quiz-toast";
+      el.textContent = String(message || "操作成功");
+      document.body.appendChild(el);
+      setTimeout(function () { el.classList.add("show"); }, 10);
+      setTimeout(function () {
+        el.classList.remove("show");
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 220);
+      }, 1450);
+    } catch (e) {}
   }
 
   function formatRate(correct, total) {
@@ -747,11 +1141,13 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     return "易错：" + selected + "→" + answer;
   }
 
-  function statItem(value, label, cls) {
+  function statItem(value, label, cls, extraClass) {
+    var safeValue = escapeHtml(value);
+    var safeLabel = escapeHtml(label);
     return ""
-      + '<div class="stat-item">'
-      + '<div class="stat-value ' + (cls || "") + '">' + escapeHtml(value) + '</div>'
-      + '<div class="stat-label">' + escapeHtml(label) + '</div>'
+      + '<div class="stat-item ' + (extraClass || "") + '" title="' + safeLabel + '：' + safeValue + '">'
+      + '<div class="stat-value ' + (cls || "") + '">' + safeValue + '</div>'
+      + '<div class="stat-label">' + safeLabel + '</div>'
       + '</div>';
   }
 
@@ -763,7 +1159,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
 
     html += statItem(answer || "未填写", "正确答案", "stat-blue");
     html += statItem(selected || "暂无", "你的选择", selected && !isCorrectAnswer(answer, selected) ? "stat-red" : "stat-orange");
-    html += statItem(mistakeText, "易错易漏", mistakeText === "暂无" ? "" : "stat-red");
+    html += statItem(mistakeText, "易错易漏", mistakeText === "暂无" ? "" : "stat-red", "stat-item-mistake");
     html += statItem(formatRate(stats.correct, stats.total), "综合统计", "stat-red");
     html += statItem(formatRate(stats.singleCorrect, stats.singleTotal), "单选统计", "stat-red");
     html += statItem(formatRate(stats.multiCorrect, stats.multiTotal), "多选统计", "stat-red");
@@ -775,13 +1171,18 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     return html;
   }
 
-  function recordIfNeeded(storeKey, q, b, type, state) {
+  function recordOrUpdate(storeKey, q, b, type, state) {
     var selected = normalizeAnswer(state && state.selected);
     var answer = normalizeAnswer(b.answer);
 
-    if (!state) state = {};
+    if (!state) state = createAttempt(storeKey);
 
-    if (!selected || !answer || state.recorded) {
+    if (!state.usedMs) {
+      state.usedMs = Date.now() - Number(state.startedAt || Date.now());
+    }
+
+    if (!selected || !answer) {
+      saveAttempt(storeKey, state);
       return {
         records: readRecords(),
         usedMs: state.usedMs || 0,
@@ -789,34 +1190,51 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
       };
     }
 
-    var usedMs = Date.now() - Number(state.startedAt || Date.now());
     var d = diffAnswer(answer, selected);
     var right = isCorrectAnswer(answer, selected);
     var records = readRecords();
+    var recordId = state.attemptId || (storeKey + "_" + Date.now());
+    var updated = false;
 
-    records.push({
-      cardKey: storeKey,
-      question: q.question.slice(0, 80),
-      type: type,
-      answer: answer,
-      selected: selected,
-      isRight: right,
-      missed: d.missed,
-      extra: d.extra,
-      usedMs: usedMs,
-      score: right ? 1 : 0,
-      ts: Date.now()
-    });
+    for (var i = records.length - 1; i >= 0; i--) {
+      if (records[i].recordId === recordId) {
+        records[i].selected = selected;
+        records[i].isRight = right;
+        records[i].missed = d.missed;
+        records[i].extra = d.extra;
+        records[i].usedMs = state.usedMs;
+        records[i].score = right ? 1 : 0;
+        updated = true;
+        break;
+      }
+    }
+
+    if (!updated) {
+      records.push({
+        recordId: recordId,
+        cardKey: storeKey,
+        question: q.question.slice(0, 80),
+        type: type,
+        answer: answer,
+        selected: selected,
+        isRight: right,
+        missed: d.missed,
+        extra: d.extra,
+        usedMs: state.usedMs,
+        score: right ? 1 : 0,
+        ts: Date.now()
+      });
+    }
 
     writeRecords(records);
 
     state.recorded = true;
-    state.usedMs = usedMs;
+    state.attemptId = recordId;
     saveAttempt(storeKey, state);
 
     return {
       records: records,
-      usedMs: usedMs,
+      usedMs: state.usedMs,
       selected: selected
     };
   }
@@ -847,7 +1265,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     html += '<button class="cc-btn cc-danger" data-cc-action="reset-stats"><span>↺</span><b>重置统计</b><em>清零</em></button>';
 
     html += '</div>';
-    html += '<div class="cc-tip">统计仅保存在本机 Anki 模板内，不等于 Anki 官方统计。</div>';
+    html += '<div class="cc-tip">统计仅保存在本机模板内，不等于 Anki 官方统计。</div>';
     html += '</div>';
     html += '</div>';
 
@@ -855,6 +1273,11 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
   }
 
   function render() {
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+
     var target = document.getElementById("quiz-card");
     var sideEl = document.getElementById("side-flag");
 
@@ -863,43 +1286,47 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     var side = sideEl.getAttribute("data-side") || "front";
     var settings = readSettings();
 
-    var rawQuestion = getText("raw-question");
-    var rawBack = getText("raw-back");
+    var rawQuestion = getBestQuestionRaw();
+    var rawBack = getBestBackRaw();
+
     var combined = splitCombinedQuestion(rawQuestion, rawBack);
 
     var q = parseQuestion(combined.front);
     var b = parseBack(combined.back);
+
+    if (!b.answer) {
+      b = parseBack(rawQuestion + "\n" + rawBack);
+    }
 
     var answer = normalizeAnswer(b.answer);
     b.answer = answer;
 
     var type = b.type || q.type || (answer.length > 1 ? "多选" : "单选");
     var storeKey = makeKey(q, b);
+    var legacyStoreKey = makeLegacyKey(q, b);
 
-    var state;
-    var selected = "";
-    var usedMs = 0;
-    var records = readRecords();
-
-    if (side === "front") {
-      state = readAttempt(storeKey);
-
-      if (!state || state.recorded) {
-        state = createAttempt(storeKey);
-      }
-
-      selected = normalizeAnswer(state.selected);
+    var state = readAttempt(storeKey);
+    if (!state && legacyStoreKey !== storeKey) {
+      state = readAttempt(legacyStoreKey);
+      if (state) saveAttempt(storeKey, state);
     }
 
+    if (!state || (side === "front" && state.recorded)) {
+      state = createAttempt(storeKey);
+    }
+
+    var selected = normalizeAnswer(state.selected);
+    var usedMs = Date.now() - Number(state.startedAt || Date.now());
+    var records = readRecords();
+
     if (side === "back") {
-      state = readAttempt(storeKey) || {};
-      var result = recordIfNeeded(storeKey, q, b, type, state);
+      var result = recordOrUpdate(storeKey, q, b, type, state);
       records = result.records;
       usedMs = result.usedMs;
       selected = result.selected;
     }
 
-    var optionKeys = getOptionKeys(q, settings, state, storeKey, side);
+    var optionKeys = getOptionKeys(q, settings, state, storeKey);
     var selectedArr = selected ? selected.split("") : [];
     var answerArr = answer ? answer.split("") : [];
 
@@ -918,7 +1345,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
 
     html += '<div class="question">';
     html += '<span class="q-type">【' + escapeHtml(type) + '】</span>';
-    html += escapeHtml(q.question);
+    html += escapeHtml(q.question || "题干未识别");
     html += '</div>';
 
     html += '<div class="options">';
@@ -926,11 +1353,14 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     optionKeys.forEach(function (key) {
       var cls = "option";
 
-      if (side === "front" && selectedArr.indexOf(key) !== -1) {
-        cls += " selected";
+      if (side === "front") {
+        if (selectedArr.indexOf(key) !== -1) {
+          cls += " selected";
+        }
       }
 
       if (side === "back") {
+        cls += " locked";
         if (answerArr.indexOf(key) !== -1) {
           cls += " correct";
         } else if (selectedArr.indexOf(key) !== -1) {
@@ -948,7 +1378,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
 
     html += '</div>';
 
-    if (b.tag) {
+    if (side === "back" && b.tag) {
       html += '<div class="tag-row">';
 
       b.tag.split(/[\/｜|]/).forEach(function (t) {
@@ -963,7 +1393,7 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     }
 
     if (side === "front") {
-      html += '<div class="bottom-line">👀 看答案</div>';
+      html += '<div class="bottom-line">👀 看答案 ｜ 本组总用时：<span id="chapter-time">' + formatTime(getChapterElapsedMs()) + '</span></div>';
     }
 
     if (side === "back") {
@@ -990,14 +1420,30 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
 
     bindControlCenter(storeKey);
     bindAnalysisToggle();
+    bindOptionClick(storeKey, type, side, q, b);
 
     if (side === "front") {
-      bindOptionClick(storeKey, type);
+      startLiveTimer(storeKey);
     }
   }
 
-  function bindOptionClick(storeKey, type) {
+  function startLiveTimer(storeKey) {
+    var chapterEl = document.getElementById("chapter-time");
+    var liveEl = document.getElementById("live-time");
+    if (!chapterEl && !liveEl) return;
+
+    timerId = setInterval(function () {
+      if (chapterEl) chapterEl.innerText = formatTime(getChapterElapsedMs());
+      if (liveEl) {
+        var state = readAttempt(storeKey);
+        if (state && state.startedAt) liveEl.innerText = formatTime(Date.now() - Number(state.startedAt));
+      }
+    }, 1000);
+  }
+
+  function bindOptionClick(storeKey, type, side, q, b) {
     var options = Array.prototype.slice.call(document.querySelectorAll(".option"));
+    if (side !== "front") return;
 
     options.forEach(function (option) {
       option.addEventListener("click", function () {
@@ -1022,15 +1468,22 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
         state.selected = selected;
         saveAttempt(storeKey, state);
 
-        options.forEach(function (item) {
-          var key = item.getAttribute("data-choice") || "";
+        if (side === "front") {
+          options.forEach(function (item) {
+            var key = item.getAttribute("data-choice") || "";
 
-          item.classList.remove("selected");
+            item.classList.remove("selected");
 
-          if (selected.indexOf(key) !== -1) {
-            item.classList.add("selected");
-          }
-        });
+            if (selected.indexOf(key) !== -1) {
+              item.classList.add("selected");
+            }
+          });
+        }
+
+        if (side === "back") {
+          recordOrUpdate(storeKey, q, b, type, state);
+          render();
+        }
       });
     });
   }
@@ -1080,14 +1533,15 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
           return;
         }
 
-        if (action === "toggle-animation") settings.animation = !settings.animation;
-        if (action === "toggle-random") settings.random = !settings.random;
-        if (action === "toggle-pure") settings.pure = !settings.pure;
-        if (action === "toggle-stats") settings.showStats = !settings.showStats;
-        if (action === "toggle-analysis") settings.showAnalysis = !settings.showAnalysis;
+        if (action === "toggle-animation") { settings.animation = !settings.animation; showToast(settings.animation ? "已开启动画" : "已关闭动画"); }
+        if (action === "toggle-random") { settings.random = !settings.random; showToast(settings.random ? "已开启随机选项" : "已关闭随机选项"); }
+        if (action === "toggle-pure") { settings.pure = !settings.pure; showToast(settings.pure ? "已开启纯色模式" : "已关闭纯色模式"); }
+        if (action === "toggle-stats") { settings.showStats = !settings.showStats; showToast(settings.showStats ? "已显示反面统计" : "已隐藏反面统计"); }
+        if (action === "toggle-analysis") { settings.showAnalysis = !settings.showAnalysis; showToast(settings.showAnalysis ? "已显示解析" : "已隐藏解析"); }
 
         if (action === "clear-current") {
           removeAttempt(storeKey);
+          showToast("已清空本题选择");
           render();
           return;
         }
@@ -1096,7 +1550,8 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
           try {
             localStorage.removeItem(RECORDS_KEY);
           } catch (e) {}
-
+          resetChapterTimer();
+          showToast("已重置统计和本组计时");
           render();
           return;
         }
@@ -1113,7 +1568,6 @@ const QUIZ_CHOICE_JS = String.raw`(function () {
     render();
   }
 })();`
-
 
 const QA_TEMPLATE_CSS = String.raw`.miki-card {
   box-sizing: border-box;

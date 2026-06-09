@@ -4,6 +4,8 @@ import ToolbarButton from './ToolbarButton.jsx'
 import PixelItemIcon from './PixelItemIcon.jsx'
 import CollapseToggle from './CollapseToggle.jsx'
 import CardContent from './CardContent.jsx'
+import AnkiSandboxFrame from './AnkiSandboxFrame.jsx'
+import TemplateManager from './TemplateManager.jsx'
 import AuthDialog from './AuthDialog.jsx'
 import Shell from './Shell.jsx'
 import { motion } from 'framer-motion'
@@ -116,6 +118,62 @@ const BROWSE_CARD_GRID_CLASSES = {
 const BUILTIN_DYL_PACK_ID = 'dyl-exam'
 const BUILTIN_DYL_DATA_URL = '/bundles/dyl-exam/data.json'
 const APP_THEME_STORAGE_KEY = `${STORAGE_KEY}:theme`
+
+function escapeFrameHtml(value = '') {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\n/g, '<br />')
+}
+
+function stripPreviewStyleScriptBlocks(value = '') {
+  return String(value ?? '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/^\s*<\/style>\s*/i, '')
+    .replace(/<\/style>\s*$/i, '')
+}
+
+function htmlToPreviewText(value = '') {
+  const raw = String(value ?? '')
+  if (!raw) return ''
+  if (typeof document !== 'undefined') {
+    const element = document.createElement('div')
+    element.innerHTML = raw
+    return String(element.textContent || element.innerText || '').replace(/\s+/g, ' ').trim()
+  }
+  return raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function looksLikeStyleOrScriptPreview(value = '') {
+  const raw = String(value ?? '').trim()
+  if (!raw) return false
+  if (/^<\/?(?:style|script)\b/i.test(raw)) return true
+  const stripped = stripPreviewStyleScriptBlocks(raw).trim()
+  if (!stripped) return true
+  const text = htmlToPreviewText(stripped || raw)
+  const probe = (text || stripped || raw).trim()
+  if (!probe) return true
+  if (/^(?:\/\*|@(?:media|font-face|keyframes)|\.|#|body\b|html\b|\.card\b)/i.test(probe)) return true
+  if (/<(?:div|p|span|table|img|section|article|main|h[1-6]|ul|ol|li|br|hr|button|input|label|svg|math|canvas|audio|video)\b/i.test(stripped)) return false
+  return /(?:\/\*[\s\S]*?\*\/|[.#]?[a-z0-9_-]+(?:\s+[.#]?[a-z0-9_-]+|[:.#][a-z0-9_-]+)?\s*\{[\s\S]*?:[\s\S]*?\})/i.test(probe)
+}
+
+function isStyleOrScriptPreviewSection(section) {
+  const label = `${section?.id ?? ''} ${section?.label ?? ''}`.toLowerCase()
+  if (/(?:css|style|stylesheet|样式|脚本|script|javascript|\bjs\b)/i.test(label)) return true
+  return looksLikeStyleOrScriptPreview(section?.html) || looksLikeStyleOrScriptPreview(section?.text)
+}
+
+function makeBrowsePreviewFallbackHtml(text = '') {
+  const clean = String(text ?? '').trim()
+  if (!clean || looksLikeStyleOrScriptPreview(clean)) return ''
+  return `<div class="miki-preview-text-fallback">${escapeFrameHtml(clean)}</div>`
+}
+
 const STUDY_GRADE_OPTIONS = [
   {
     grade: 0,
@@ -787,6 +845,8 @@ function BrowseWorktable({
   onDeleteCards,
   onMoveScope,
   onMergeDecks,
+  onSaveCardTemplate,
+  onDeleteCardTemplate,
 }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -805,6 +865,9 @@ function BrowseWorktable({
   const [visibleCount, setVisibleCount] = useState(BROWSE_CARD_RENDER_LIMIT)
   const [cardColumnCount, setCardColumnCount] = useState(getInitialBrowseCardColumns)
   const [previewMode, setPreviewMode] = useState(getInitialBrowsePreviewMode)
+  const [templateManagerOpen, setTemplateManagerOpen] = useState(false)
+  const [templateManagerSelectedId, setTemplateManagerSelectedId] = useState('qa')
+  const [actionToast, setActionToast] = useState('')
   const loadMoreSentinelRef = useRef(null)
   const initializedScopeRef = useRef(false)
   const cardGridClassName = BROWSE_CARD_GRID_CLASSES[cardColumnCount] ?? BROWSE_CARD_GRID_CLASSES[2]
@@ -874,7 +937,10 @@ function BrowseWorktable({
     : null
   const previewCard = previewCardId ? browseCardById.get(previewCardId) : selectedCard
   const previewReady = Boolean(selectedCard && previewCard && previewCard.id === selectedCard.id && !previewPending)
-  const previewHtmlSections = useMemo(() => getCardHtmlSections(previewCard), [previewCard])
+  const previewHtmlSections = useMemo(
+    () => getCardHtmlSections(previewCard).filter((section) => !isStyleOrScriptPreviewSection(section)),
+    [previewCard],
+  )
   const previewPlainText = useMemo(() => getBrowsePreviewPlainText(previewCard, previewHtmlSections), [previewCard, previewHtmlSections])
   const shouldRenderPreviewSections = previewHtmlSections.length > 0 && (previewMode === 'auto' || previewMode === 'html')
   const selectedScopeDeckId = selectedCard?.deckId ?? scopeDeckIds[0] ?? selectedDeckId ?? data.decks[0]?.id ?? ''
@@ -963,6 +1029,12 @@ function BrowseWorktable({
       window.removeEventListener('scroll', closeMenu, true)
     }
   }, [])
+
+  function showActionToast(message) {
+    setActionToast(message)
+    window.clearTimeout(showActionToast.timer)
+    showActionToast.timer = window.setTimeout(() => setActionToast(''), 1600)
+  }
 
   function selectScope(node) {
     startTransition(() => {
@@ -1134,6 +1206,7 @@ ${title}
 删除后会同时移除它的复习记录。`)
     if (!confirmed) return
     onDeleteCards([card.id])
+    showActionToast('已删除卡片')
     setSelectedCardId((current) => (current === card.id ? null : current))
     setPreviewCardId((current) => (current === card.id ? null : current))
     setContextMenu(null)
@@ -1146,12 +1219,14 @@ ${title}
   function resetCardProgress(card) {
     if (!card?.id) return
     onUpdateCardMeta?.(card.id, { review: makeFreshReview() })
+    showActionToast('已重置进度')
     setContextMenu(null)
   }
 
   function toggleCardSuspended(card) {
     if (!card?.id) return
     onUpdateCardMeta?.(card.id, { suspended: !card.suspended })
+    showActionToast(card.suspended ? '已取消暂停' : '已暂停')
     setContextMenu(null)
   }
 
@@ -1171,13 +1246,15 @@ ${title}
   function openCardTemplatePreview(card) {
     if (!card?.id) return
     setSelectedCardId(card.id)
-    setPreviewMode('html')
+    setTemplateManagerSelectedId(card.template || 'qa')
+    setTemplateManagerOpen(true)
     setContextMenu(null)
+    showActionToast('已打开模板窗口')
   }
 
   function openSortHint(card) {
     setSelectedCardId(card?.id ?? null)
-    window.alert('排序入口已放好。当前版本会先选中这张卡；后续可以接入拖拽排序或同目录内上下移动。')
+    showActionToast('已选中卡片，可接入拖拽排序')
     setContextMenu(null)
   }
 
@@ -1567,13 +1644,12 @@ ${title}
                     {previewHtmlSections.map((section) => (
                       <section key={section.id} className="browse-preview-section rounded-xl border border-gray-100 bg-white p-3">
                         <h3 className="mb-2 border-b border-gray-100 pb-2 text-xs font-black text-gray-400">{section.label}</h3>
-                        <CardContent
-                          card={previewCard}
-                          side="back"
-                          htmlOverride={section.html || ''}
-                          textOverride={section.text || ''}
-                          className="text-sm leading-relaxed text-gray-700 break-words"
-                          fallbackClassName="text-sm leading-relaxed text-gray-700 break-words whitespace-pre-wrap"
+                        <AnkiSandboxFrame
+                          html={section.html || ''}
+                          css={previewCard?.cardCss || ''}
+                          fallbackHtml={isStyleOrScriptPreviewSection(section) ? '' : makeBrowsePreviewFallbackHtml(section.text || '')}
+                          title={`${previewCard?.id ?? 'preview'}-${section.id}`}
+                          className="text-sm leading-relaxed text-gray-700"
                         />
                       </section>
                     ))}
@@ -1611,6 +1687,26 @@ ${title}
           )}
         </aside>
       </div>
+
+      <TemplateManager
+        open={templateManagerOpen}
+        data={data}
+        selectedTemplateId={templateManagerSelectedId}
+        onSelectTemplate={(templateId) => {
+          setTemplateManagerSelectedId(templateId)
+          setTemplateManagerOpen(false)
+          showActionToast('已套用模板')
+        }}
+        onSaveTemplate={onSaveCardTemplate}
+        onDeleteTemplate={onDeleteCardTemplate}
+        onClose={() => setTemplateManagerOpen(false)}
+      />
+
+      {actionToast && (
+        <div className="fixed bottom-7 left-1/2 z-[70] -translate-x-1/2 rounded-full bg-gray-950/90 px-4 py-2 text-xs font-black text-white shadow-2xl">
+          {actionToast}
+        </div>
+      )}
 
       {contextMenu && (
         <div className="fixed z-50 w-56 rounded-xl border border-gray-200 bg-white p-1.5 text-xs font-bold text-gray-700 shadow-2xl" style={menuStyle} onClick={(event) => event.stopPropagation()}>
@@ -1701,7 +1797,7 @@ ${title}
   )
 }
 
-function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteCards, onMoveScope, onMergeDecks }) {
+function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnnotation, onLinkCards, onUnlinkCards, onUpdateCardMeta, onOpenCreateDeck, onOpenEditDeck, onDeleteDeck, onDeleteCards, onMoveScope, onMergeDecks, onSaveCardTemplate, onDeleteCardTemplate }) {
   const location = useLocation()
   const navigate = useNavigate()
   const initialDeckId = location.state?.deckId ?? data.decks[0]?.id ?? ''
@@ -1802,6 +1898,8 @@ function Browse({ data, studyDeckId, cloud, onAddCardAnnotation, onRemoveCardAnn
         onDeleteCards={onDeleteCards}
         onMoveScope={onMoveScope}
         onMergeDecks={onMergeDecks}
+        onSaveCardTemplate={onSaveCardTemplate}
+        onDeleteCardTemplate={onDeleteCardTemplate}
       />
     )
   }

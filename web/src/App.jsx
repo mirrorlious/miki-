@@ -81,7 +81,9 @@ import AddCard from './components/AddCard.jsx'
 import { compressImageFile } from './lib/imageUtils.js'
 import { tokenizeForRelated } from './lib/textUtils.js'
 import { getDateLabel, formatCountdown, formatCountdownWithDays, getCountdownInfo, formatStudyDate } from './lib/dateUtils.js'
-import { makeLocalCacheData, persistDataToLocalCache } from './lib/storageUtils.js'
+import { loadAppDataFromIndexedDb, saveAppDataToIndexedDb, persistLightLocalCache } from './lib/indexedDbStore.js'
+import { loadUserAnkiPacksAsData } from './lib/userAnkiPackStore.js'
+import { makeUserAnkiCardOverride, mergeUserAnkiPackData } from './lib/userAnkiPackUtils.js'
 import { getReviewReps, getCardReviewReps, makeNewCardReview, hasStartedCard, getReviewDueTime, isReviewDue, formatReviewDueLabel, makeDailyCardSourceKey } from './lib/reviewUtils.js'
 import { escapeHtmlText, makeTemplateFieldHtml, applyCardTemplateCode, buildCardValueFromTemplate } from './lib/cardHtml.js'
 import { DECK_COLOR_OPTIONS, DEFAULT_DECK_SECTIONS, UNGROUPED_SECTION, PROFESSIONAL_SECTIONS, ANNOTATION_TYPES, CHAPTER_MILESTONE_SECONDS, BUILTIN_DYL_PACK_ID, REWARD_OPTIONS } from './lib/constants.js'
@@ -139,6 +141,13 @@ function Home() {
   return <Navigate to="/decks" replace />
 }
 
+function stripLegacyFullApkgCards(data = {}) {
+  if (!Array.isArray(data.cards)) return data
+  const cards = data.cards.filter((card) => !(card?.source?.type === 'apkg' && !card?.source?.userAnkiPack && !card?.userAnkiPack && !card?.userAnkiOverride))
+  if (cards.length === data.cards.length) return data
+  return { ...data, cards }
+}
+
 function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
   const { deckId } = useParams()
   const navigate = useNavigate()
@@ -153,6 +162,13 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
   const [drillTargetDeckId, setDrillTargetDeckId] = useState(deckId ?? '')
   const [drillTargetChapterKey, setDrillTargetChapterKey] = useState('')
   const [dismissedDrillCardIds, setDismissedDrillCardIds] = useState(() => new Set())
+  const [gradeBarFloating, setGradeBarFloating] = useState(() => {
+    try {
+      return localStorage.getItem('miki.study.gradeBarFloating') !== 'false'
+    } catch {
+      return true
+    }
+  })
   const canGradeRef = useRef(false)
   const deck = data.decks.find((item) => item.id === deckId) ?? data.decks[0]
   const today = todayKey()
@@ -248,7 +264,7 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
   const activeCardDeck = activeCard ? deckById.get(activeCard.deckId) : null
   const activeCardDeckLabel = activeCardDeck ? getDeckOptionLabel(activeCardDeck) : activeDeckPath
   const reviewedCards = studyCards.filter(hasStartedCard).length
-  const masteredCards = studyCards.filter((card) => (card.review?.interval ?? 0) >= 7).length
+  const masteredCards = studyCards.filter((card) => hasStartedCard(card) && (card.review?.interval ?? 0) >= 7).length
   const newCards = studyCards.filter(isNewCard).length
   const remainingInSession = studyMode === 'drill' ? (activeCard ? 1 : 0) : (queue.length + newQueue.length) || (activeCard ? 1 : 0)
   const sessionTotal = session.reviewed + remainingInSession
@@ -292,6 +308,14 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
   useEffect(() => {
     setSession({ reviewed: 0, grades: { 0: 0, 1: 0, 2: 0, 3: 0 } })
   }, [deck?.id])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('miki.study.gradeBarFloating', gradeBarFloating ? 'true' : 'false')
+    } catch {
+      // ignore storage failures
+    }
+  }, [gradeBarFloating])
 
   function drawDrillCard() {
     setStudyMode('drill')
@@ -514,7 +538,16 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
             {studyNotePanel}
           </section>
         )}
-        {revealed && <GradeButtons options={gradeOptionsWithDue} sessionGrades={session.grades} onGrade={handleGrade} />}
+        {revealed && gradeBarFloating && <div className="h-36 sm:h-32" aria-hidden="true" />}
+        {revealed && (
+          <GradeButtons
+            options={gradeOptionsWithDue}
+            sessionGrades={session.grades}
+            onGrade={handleGrade}
+            floating={gradeBarFloating}
+            onChangeFloating={setGradeBarFloating}
+          />
+        )}
       </div>
     </Shell>
   )
@@ -522,15 +555,22 @@ function Study({ data, onReviewCard, onUpdateCardMeta, studyDeckId, cloud }) {
 
 export default function App() {
   const location = useLocation()
-  const initial = useMemo(() => normalizeImportedAnkiCards(loadData()), [])
+  const initial = useMemo(() => normalizeImportedAnkiCards(stripLegacyFullApkgCards(loadData())), [])
   const [data, setData] = useState(initial)
+  const indexedDbSaveTimerRef = useRef(null)
+  const indexedDbReadyRef = useRef(false)
   const [theme, setTheme] = useState(getInitialTheme)
   const [deckDialog, setDeckDialog] = useState({ open: false, mode: 'create', deck: null })
   const cloud = useCloudSync(data, setData)
   const [builtinDyl, setBuiltinDyl] = useState({ loaded: false, decks: [], cards: [] })
+  const [userAnkiPacks, setUserAnkiPacks] = useState({ loaded: false, decks: [], cards: [], packs: [] })
   const signedIn = Boolean(cloud.user)
-  const appData = useMemo(() => normalizeImportedAnkiCards(mergeBuiltinDylData(data, builtinDyl, signedIn)), [builtinDyl, data, signedIn])
+  const appData = useMemo(() => {
+    const withBuiltin = mergeBuiltinDylData(data, builtinDyl, signedIn)
+    return normalizeImportedAnkiCards(mergeUserAnkiPackData(withBuiltin, userAnkiPacks))
+  }, [builtinDyl, data, signedIn, userAnkiPacks])
   const builtinCardMap = useMemo(() => new Map(builtinDyl.cards.map((card) => [card.id, card])), [builtinDyl.cards])
+  const userAnkiCardMap = useMemo(() => new Map((userAnkiPacks.cards || []).map((card) => [card.id, card])), [userAnkiPacks.cards])
   const studyDeckId = appData.decks[0]?.id ?? null
   const focusSessionRef = useRef(null)
   const lastActiveAtRef = useRef(Date.now())
@@ -555,8 +595,41 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const stored = await loadAppDataFromIndexedDb(initial)
+        if (!cancelled && stored?.decks && stored?.cards) {
+          indexedDbReadyRef.current = true
+          setData(normalizeImportedAnkiCards(stripLegacyFullApkgCards(stored)))
+        }
+      } catch (error) {
+        indexedDbReadyRef.current = true
+        console.warn('IndexedDB 启动读取失败，先使用轻量缓存。', error)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [initial])
+
+  useEffect(() => {
     setData((current) => normalizeImportedAnkiCards(current))
   }, [data.cards])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const bundle = await loadUserAnkiPacksAsData()
+        if (!cancelled) setUserAnkiPacks(bundle)
+      } catch (error) {
+        console.warn('用户导入 Anki 分块读取失败。', error)
+        if (!cancelled) setUserAnkiPacks({ loaded: true, decks: [], cards: [], packs: [] })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -602,7 +675,21 @@ export default function App() {
   }, [signedIn])
 
   useEffect(() => {
-    persistDataToLocalCache(data)
+    if (indexedDbSaveTimerRef.current) window.clearTimeout(indexedDbSaveTimerRef.current)
+    indexedDbSaveTimerRef.current = window.setTimeout(() => {
+      saveAppDataToIndexedDb(data).catch((error) => {
+        console.warn('IndexedDB 保存失败，回退到轻量 localStorage 缓存。', error)
+        try {
+          persistLightLocalCache(data)
+        } catch (fallbackError) {
+          console.warn('轻量缓存也保存失败。', fallbackError)
+        }
+      })
+    }, indexedDbReadyRef.current ? 500 : 1200)
+
+    return () => {
+      if (indexedDbSaveTimerRef.current) window.clearTimeout(indexedDbSaveTimerRef.current)
+    }
   }, [data])
 
   useEffect(() => {
@@ -689,16 +776,33 @@ export default function App() {
   }
 
   function deleteDeck(deckId) {
+    deleteDecks([deckId])
+  }
+
+  function deleteDecks(deckIds = []) {
+    const ids = Array.from(new Set((Array.isArray(deckIds) ? deckIds : [deckIds]).map((id) => String(id || '')).filter(Boolean)))
+    if (!ids.length) return
     startTransition(() => {
-      setData((current) => ({
-        ...current,
-        decks: current.decks.filter((deck) => deck.id !== deckId),
-        cards: current.cards.filter((card) => card.deckId !== deckId),
-        reviewLogs: current.reviewLogs.filter((log) => {
-          const card = current.cards.find((item) => item.id === log.cardId)
-          return card ? card.deckId !== deckId : true
-        }),
-      }))
+      setData((current) => {
+        const idSet = new Set(ids)
+        const currentCards = Array.isArray(current.cards) ? current.cards : []
+        const normalDecks = Array.isArray(current.decks) ? current.decks : []
+        const deletedUserAnkiDeckIds = new Set(Array.isArray(current.profile?.deletedUserAnkiDeckIds) ? current.profile.deletedUserAnkiDeckIds.map(String) : [])
+        ids.forEach((id) => deletedUserAnkiDeckIds.add(id))
+        return {
+          ...current,
+          profile: {
+            ...(current.profile || {}),
+            deletedUserAnkiDeckIds: Array.from(deletedUserAnkiDeckIds),
+          },
+          decks: normalDecks.filter((deck) => !idSet.has(String(deck.id))),
+          cards: currentCards.filter((card) => !idSet.has(String(card.deckId))),
+          reviewLogs: (current.reviewLogs || []).filter((log) => {
+            const card = currentCards.find((item) => item.id === log.cardId)
+            return card ? !idSet.has(String(card.deckId)) : true
+          }),
+        }
+      })
     })
   }
 
@@ -816,26 +920,46 @@ export default function App() {
   }
 
   function deleteSection(sectionName) {
+    deleteSections([sectionName])
+  }
+
+  function deleteSections(sectionNames = []) {
+    const names = Array.from(new Set((Array.isArray(sectionNames) ? sectionNames : [sectionNames])
+      .map((name) => normalizePathPart(name))
+      .filter(Boolean)))
+    if (!names.length) return
+
     startTransition(() => {
       setData((current) => {
+        const sectionKeySet = new Set(names.map((name) => name.toLowerCase()))
+        const currentDecks = Array.isArray(current.decks) ? current.decks : []
+        const currentCards = Array.isArray(current.cards) ? current.cards : []
+        const currentReviewLogs = Array.isArray(current.reviewLogs) ? current.reviewLogs : []
         const deletedDeckIds = new Set(
-          current.decks
-            .filter((deck) => getDeckSection(deck) === sectionName)
-            .map((deck) => deck.id),
+          currentDecks
+            .filter((deck) => sectionKeySet.has(normalizePathPart(getDeckSection(deck)).toLowerCase()))
+            .map((deck) => String(deck.id)),
         )
-        if (deletedDeckIds.size === 0) return current
-
         const deletedCardIds = new Set(
-          current.cards
-            .filter((card) => deletedDeckIds.has(card.deckId))
-            .map((card) => card.id),
+          currentCards
+            .filter((card) => deletedDeckIds.has(String(card.deckId)))
+            .map((card) => String(card.id)),
         )
+        const deletedUserAnkiDeckIds = new Set(Array.isArray(current.profile?.deletedUserAnkiDeckIds) ? current.profile.deletedUserAnkiDeckIds.map(String) : [])
+        deletedDeckIds.forEach((id) => deletedUserAnkiDeckIds.add(id))
+        const deletedDeckSections = new Set(Array.isArray(current.profile?.deletedDeckSections) ? current.profile.deletedDeckSections.map(normalizePathPart).filter(Boolean) : [])
+        names.forEach((name) => deletedDeckSections.add(name))
 
         return {
           ...current,
-          decks: current.decks.filter((deck) => !deletedDeckIds.has(deck.id)),
-          cards: current.cards.filter((card) => !deletedDeckIds.has(card.deckId)),
-          reviewLogs: current.reviewLogs.filter((log) => !deletedCardIds.has(log.cardId)),
+          profile: {
+            ...(current.profile || {}),
+            deletedUserAnkiDeckIds: Array.from(deletedUserAnkiDeckIds),
+            deletedDeckSections: Array.from(deletedDeckSections),
+          },
+          decks: currentDecks.filter((deck) => !deletedDeckIds.has(String(deck.id))),
+          cards: currentCards.filter((card) => !deletedDeckIds.has(String(card.deckId))),
+          reviewLogs: currentReviewLogs.filter((log) => !deletedCardIds.has(String(log.cardId))),
         }
       })
     })
@@ -860,7 +984,7 @@ export default function App() {
         ...current,
         cards: [
           {
-            id: `card-${Date.now()}`,
+            id: cardValue.id ?? `card-${Date.now()}`,
             deckId,
             front: cardValue.front ?? '新建问题',
             back: cardValue.back ?? '把这里替换成答案或解释。',
@@ -913,6 +1037,10 @@ export default function App() {
             cardCss: cardValue.cardCss || undefined,
             cardJs: cardValue.cardJs || undefined,
             htmlSections: cardValue.htmlSections || undefined,
+            sourceKey: cardValue.sourceKey ?? card.sourceKey,
+            source: cardValue.source ?? card.source,
+            anki: cardValue.anki ?? card.anki,
+            templateId: cardValue.templateId ?? card.templateId,
             updatedAt: Date.now(),
           }
         }),
@@ -974,6 +1102,8 @@ export default function App() {
             ...(card.cardCss ? { cardCss: card.cardCss } : {}),
             ...(card.cardJs ? { cardJs: card.cardJs } : {}),
             ...(card.htmlSections ? { htmlSections: card.htmlSections } : {}),
+            ...(card.anki ? { anki: card.anki } : {}),
+            ...(card.templateId ? { templateId: card.templateId } : {}),
             ...(card.sourceKey ? { sourceKey: card.sourceKey } : {}),
             ...(card.source ? { source: card.source } : {}),
           }
@@ -997,10 +1127,17 @@ export default function App() {
         })
         const untouchedCards = current.cards.filter((card) => !((autoAnkiDecks || card.deckId === deckId) && updatedSourceKeys.has(card.sourceKey)))
 
+        const incomingTemplates = Array.isArray(options.templates) ? options.templates : []
+        const templateMap = new Map([
+          ...(Array.isArray(current.templates) ? current.templates : []).map((template) => [template.id, template]),
+          ...incomingTemplates.filter((template) => template?.id).map((template) => [template.id, template]),
+        ])
+
         return {
           ...current,
           decks: createdDecks.length > 0 ? [...current.decks, ...createdDecks] : current.decks,
           cards: [...cards, ...untouchedCards],
+          ...(templateMap.size > 0 ? { templates: Array.from(templateMap.values()) } : {}),
         }
       })
     })
@@ -1077,11 +1214,20 @@ export default function App() {
       if (found) return { ...current, cards }
 
       const baseCard = builtinCardMap.get(cardId)
-      if (!baseCard) return current
-      const patch = typeof patcher === 'function' ? patcher(baseCard) : patcher
+      if (baseCard) {
+        const patch = typeof patcher === 'function' ? patcher(baseCard) : patcher
+        return {
+          ...current,
+          cards: [makeBuiltinCardOverride(baseCard, patch), ...current.cards],
+        }
+      }
+
+      const userAnkiBaseCard = userAnkiCardMap.get(cardId)
+      if (!userAnkiBaseCard) return current
+      const patch = typeof patcher === 'function' ? patcher(userAnkiBaseCard) : patcher
       return {
         ...current,
-        cards: [makeBuiltinCardOverride(baseCard, patch), ...current.cards],
+        cards: [makeUserAnkiCardOverride(userAnkiBaseCard, patch), ...current.cards],
       }
     })
   }
@@ -1125,6 +1271,14 @@ export default function App() {
               review: scheduleReview(baseCard.review, grade),
               updatedAt: reviewedAt,
             }))
+          } else {
+            const userAnkiBaseCard = userAnkiCardMap.get(cardId)
+            if (userAnkiBaseCard) {
+              cards.unshift(makeUserAnkiCardOverride(userAnkiBaseCard, {
+                review: scheduleReview(userAnkiBaseCard.review, grade),
+                updatedAt: reviewedAt,
+              }))
+            }
           }
         }
 
@@ -1228,11 +1382,11 @@ export default function App() {
         <Routes>
         <Route path="/" element={<Home data={appData} cloud={cloud} />} />
         <Route path="/app" element={<Dashboard data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/decks" element={<Decks data={appData} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteCards={deleteCards} onMoveScope={moveBrowseScope} onMergeDecks={mergeBrowseDecks} />} />
+        <Route path="/decks" element={<Decks data={appData} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteDecks={deleteDecks} onDeleteSections={deleteSections} onDeleteSection={deleteSection} onSaveDailyLog={saveDailyLog} onCreateDailyCards={createDailyCards} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/browse" element={<Browse data={appData} studyDeckId={studyDeckId} cloud={cloud} onAddCardAnnotation={addCardAnnotation} onRemoveCardAnnotation={removeCardAnnotation} onLinkCards={linkCards} onUnlinkCards={unlinkCards} onUpdateCardMeta={updateCardMeta} onOpenCreateDeck={openCreateDeckDialog} onOpenEditDeck={openEditDeckDialog} onDeleteDeck={deleteDeck} onDeleteCards={deleteCards} onMoveScope={moveBrowseScope} onMergeDecks={mergeBrowseDecks} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} />} />
         <Route path="/map" element={<KnowledgeMap data={appData} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/organize" element={<Organize data={appData} onOpenCreateDeck={openCreateDeckDialog} studyDeckId={studyDeckId} cloud={cloud} />} />
-        <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
+        <Route path="/import" element={<ImportCards data={appData} onCreateCards={createCards} onUserAnkiPacksChanged={setUserAnkiPacks} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />
         <Route path="/profile" element={<Profile data={appData} cloud={cloud} studyDeckId={studyDeckId} onUpdateProfile={updateProfile} onRedeemReward={redeemReward} />} />
         <Route path="/focus-log" element={<FocusLogDayPage data={appData} cloud={cloud} studyDeckId={studyDeckId} />} />
         <Route path="/cards/new/:deckId" element={<AddCard data={appData} onCreateCard={createCard} onUpdateCard={updateCard} onSaveCardTemplate={saveCardTemplate} onDeleteCardTemplate={deleteCardTemplate} studyDeckId={studyDeckId} cloud={cloud} />} />

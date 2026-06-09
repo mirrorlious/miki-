@@ -10,7 +10,9 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
   const [activeTab, setActiveTab] = useState('frontCode')
   const [templateQuery, setTemplateQuery] = useState('')
   const [templateFilter, setTemplateFilter] = useState('all')
-  const activeTemplate = templates.find((template) => template.id === activeTemplateId) ?? templates[0]
+  const matchedTemplate = templates.find((template) => template.id === activeTemplateId)
+  const [draft, setDraft] = useState(() => normalizeCardTemplate(templates.find((template) => template.id === (selectedTemplateId || 'qa')) ?? templates[0]))
+  const activeTemplate = matchedTemplate ?? (draft?.id === activeTemplateId ? draft : templates[0])
   const filteredTemplates = useMemo(() => {
     const keyword = templateQuery.trim().toLowerCase()
     return templates.filter((template) => {
@@ -20,7 +22,6 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
       return `${template.name} ${template.description}`.toLowerCase().includes(keyword)
     })
   }, [templateFilter, templateQuery, templates])
-  const [draft, setDraft] = useState(() => normalizeCardTemplate(activeTemplate))
 
   useEffect(() => {
     if (!open) return
@@ -28,9 +29,9 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
   }, [open, selectedTemplateId])
 
   useEffect(() => {
-    if (!open || !activeTemplate) return
-    setDraft(normalizeCardTemplate(activeTemplate))
-  }, [activeTemplate, open])
+    if (!open || !matchedTemplate) return
+    setDraft(normalizeCardTemplate(matchedTemplate))
+  }, [matchedTemplate, open])
 
   if (!open) return null
 
@@ -66,6 +67,8 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
       css: '.card-front{font-size:24px;font-weight:800}.card-back{font-size:16px;line-height:1.8}',
       js: '',
     })
+    setTemplateFilter('all')
+    setTemplateQuery('')
     setActiveTemplateId(next.id)
     setDraft(next)
     setActiveTab('frontCode')
@@ -89,9 +92,12 @@ function TemplateManager({ open, data, selectedTemplateId, onSelectTemplate, onS
 
   function deleteDraft() {
     if (!canDelete) return
+    const ok = window.confirm(`确定删除模板「${draft.name}」吗？`);
+    if (!ok) return
     onDeleteTemplate(draft.id)
-    setActiveTemplateId('qa')
-    onSelectTemplate('qa')
+    const nextTemplate = templates.find((template) => template.id !== draft.id && !template.builtIn) ?? templates.find((template) => template.id === 'qa') ?? templates[0]
+    setActiveTemplateId(nextTemplate?.id ?? 'qa')
+    setDraft(normalizeCardTemplate(nextTemplate))
   }
 
   return (

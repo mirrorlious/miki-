@@ -108,10 +108,35 @@ function compactCardText(value = '', maxLength = 180) {
   return `${text.slice(0, maxLength).trim()}...`
 }
 
+function stripStyleScriptBlocks(value = '') {
+  return String(value ?? '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/^\s*<\/style>\s*/i, '')
+    .replace(/<\/style>\s*$/i, '')
+}
+
+function looksLikeCssOnlySection(value = '') {
+  const raw = String(value ?? '').trim()
+  if (!raw) return false
+  const text = stripStyleScriptBlocks(raw).trim()
+  if (!text) return true
+  if (/<(?:div|p|span|table|img|section|article|main|h[1-6]|ul|ol|li|br|hr|button|input|label|svg|math|canvas|audio|video)\b/i.test(text)) return false
+  return /\/\*[\s\S]*?\*\//.test(text)
+    || /(?:^|\n)\s*(?:\.|#|body\b|html\b|\.card\b|@media\b|@font-face\b|[a-z-]+\s*[,>{.#:])/i.test(text)
+    || /[.#]?[a-z0-9_-]+(?:\s+[.#]?[a-z0-9_-]+|[:.#][a-z0-9_-]+)?\s*\{[\s\S]*?:[\s\S]*?\}/i.test(text)
+}
+
+
 function getCardHtmlSections(card) {
-  return Array.isArray(card?.htmlSections)
-    ? card.htmlSections.filter((section) => section?.id && section?.label && (section.html || section.text))
-    : []
+  if (!Array.isArray(card?.htmlSections)) return []
+  return card.htmlSections.filter((section) => {
+    if (!section?.id || !section?.label || !(section.html || section.text)) return false
+    const label = `${section.id} ${section.label}`.toLowerCase()
+    if (/(?:css|style|stylesheet|javascript|script|\bjs\b|样式|脚本)/i.test(label)) return false
+    if (looksLikeCssOnlySection(section.html) || looksLikeCssOnlySection(section.text)) return false
+    return true
+  })
 }
 
 function hasStoredCardHtml(card) {

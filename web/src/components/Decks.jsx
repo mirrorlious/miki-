@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -17,15 +17,18 @@ import {
   Wrench,
   X,
   Flame,
+  Trash2,
+  CheckCircle2 as CheckCircleIcon,
 } from 'lucide-react'
 import { todayKey } from '../data.js'
 import { isCardDue, isNewCard } from '../lib/browseUtils.js'
-import { getDeckPath, getDeckSection, getSectionNames, sortDecksByPath } from '../lib/deckUtils.js'
+import { getDeckPath, getDeckSection, getSectionNames, normalizePathPart, sortDecksByPath } from '../lib/deckUtils.js'
 import Shell from './Shell.jsx'
 
 const CARD_MAKER_URL = 'https://anki-card-maker-xi.vercel.app/'
 
 function isWeakCard(card) {
+  if (Number(card?.review?.reps ?? 0) <= 0) return false
   const grade = Number(card?.review?.lastGrade)
   return Boolean(
     card?.flagged ||
@@ -118,12 +121,15 @@ function ToolboxItem({ icon: Icon, title, description, tone, onClick, href }) {
   )
 }
 
-function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
+function Decks({ data, onOpenCreateDeck, onDeleteDecks, onDeleteSections, studyDeckId, cloud }) {
   const navigate = useNavigate()
   const [toolboxOpen, setToolboxOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [selectedSection, setSelectedSection] = useState('全部')
   const [libraryQuery, setLibraryQuery] = useState('')
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedDeckIds, setSelectedDeckIds] = useState([])
+  const [selectedSectionNames, setSelectedSectionNames] = useState([])
 
   const today = todayKey()
   const cards = Array.isArray(data?.cards) ? data.cards : []
@@ -142,7 +148,12 @@ function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
   const estimatedMinutes = Math.max(3, Math.ceil(dueCards.length * 1.4 + Math.min(weakCards.length, 20) * 0.9 + Math.min(newCards.length, 10) * 0.8))
   const firstStudyDeckId = dueCards[0]?.deckId || weakCards[0]?.deckId || newCards[0]?.deckId || studyDeckId || decks[0]?.id
   const recommendationRows = useMemo(() => [...deckRows].filter((deck) => deck.total > 0).sort((a, b) => b.pressure - a.pressure).slice(0, 5), [deckRows])
-  const sections = useMemo(() => ['全部', ...getSectionNames(deckRows)], [deckRows])
+  const deletedSectionSet = useMemo(() => new Set(
+    Array.isArray(data?.profile?.deletedDeckSections)
+      ? data.profile.deletedDeckSections.map((section) => normalizePathPart(section).toLowerCase())
+      : [],
+  ), [data?.profile?.deletedDeckSections])
+  const sections = useMemo(() => ['全部', ...getSectionNames(deckRows).filter((section) => !deletedSectionSet.has(normalizePathPart(section).toLowerCase()))], [deckRows, deletedSectionSet])
 
   const visibleDeckRows = useMemo(() => {
     const keyword = libraryQuery.trim().toLowerCase()
@@ -151,6 +162,88 @@ function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
       .filter((deck) => selectedSection === '全部' || getDeckSection(deck) === selectedSection)
       .filter((deck) => !keyword || deck.name.toLowerCase().includes(keyword) || getDeckPath(deck).toLowerCase().includes(keyword))
   }, [deckRows, libraryQuery, selectedSection])
+
+  const visibleDeckIds = useMemo(() => visibleDeckRows.map((deck) => deck.id), [visibleDeckRows])
+  const selectedDeckIdSet = useMemo(() => new Set(selectedDeckIds), [selectedDeckIds])
+  const selectedSectionNameSet = useMemo(() => new Set(selectedSectionNames), [selectedSectionNames])
+  const selectedVisibleCount = visibleDeckIds.filter((id) => selectedDeckIdSet.has(id)).length
+  const sectionDeckIdMap = useMemo(() => {
+    const map = new Map()
+    for (const deck of deckRows) {
+      const section = getDeckSection(deck)
+      const ids = map.get(section) ?? []
+      ids.push(deck.id)
+      map.set(section, ids)
+    }
+    return map
+  }, [deckRows])
+  const selectedSectionDeckIds = useMemo(() => selectedSectionNames.flatMap((section) => sectionDeckIdMap.get(section) ?? []), [selectedSectionNames, sectionDeckIdMap])
+  const pendingDeleteDeckIds = useMemo(() => Array.from(new Set([...selectedDeckIds, ...selectedSectionDeckIds])), [selectedDeckIds, selectedSectionDeckIds])
+
+  useEffect(() => {
+    if (!batchMode) return
+    const visibleIdSet = new Set(visibleDeckIds)
+    const sectionSet = new Set(sections.filter((section) => section !== '全部'))
+    setSelectedDeckIds((ids) => ids.filter((id) => visibleIdSet.has(id)))
+    setSelectedSectionNames((names) => names.filter((name) => sectionSet.has(name)))
+  }, [batchMode, visibleDeckIds, sections])
+
+  function toggleBatchMode() {
+    setBatchMode((value) => !value)
+    setSelectedDeckIds([])
+    setSelectedSectionNames([])
+  }
+
+  function toggleSelectDeck(deckId) {
+    setSelectedDeckIds((ids) => ids.includes(deckId) ? ids.filter((id) => id !== deckId) : [...ids, deckId])
+  }
+
+  function toggleSelectSection(section) {
+    if (!section || section === '全部') return
+    setSelectedSectionNames((names) => names.includes(section) ? names.filter((name) => name !== section) : [...names, section])
+  }
+
+  function handleSectionClick(section) {
+    if (batchMode) {
+      toggleSelectSection(section)
+      return
+    }
+    setSelectedSection(section)
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedDeckIds((ids) => {
+      const idSet = new Set(ids)
+      const allSelected = visibleDeckIds.length > 0 && visibleDeckIds.every((id) => idSet.has(id))
+      if (allSelected) return ids.filter((id) => !visibleDeckIds.includes(id))
+      return Array.from(new Set([...ids, ...visibleDeckIds]))
+    })
+  }
+
+  function deleteSelectedDecks() {
+    if (!pendingDeleteDeckIds.length && !selectedSectionNames.length) return
+    const deckCount = selectedDeckIds.length
+    const sectionCount = selectedSectionNames.length
+    const label = [
+      deckCount ? `${deckCount} 个卡组` : '',
+      sectionCount ? `${sectionCount} 个分组` : '',
+    ].filter(Boolean).join('、')
+    if (!window.confirm(`确定删除选中的 ${label || `${pendingDeleteDeckIds.length} 个项目`}吗？分组下的卡组和卡片会一起移出资料库。`)) return
+
+    if (selectedSectionNames.length && onDeleteSections) {
+      onDeleteSections(selectedSectionNames)
+      const sectionDeckIdSet = new Set(selectedSectionDeckIds)
+      const directDeckIds = selectedDeckIds.filter((id) => !sectionDeckIdSet.has(id))
+      if (directDeckIds.length) onDeleteDecks?.(directDeckIds)
+    } else {
+      onDeleteDecks?.(pendingDeleteDeckIds)
+    }
+
+    if (selectedSectionNames.includes(selectedSection)) setSelectedSection('全部')
+    setSelectedDeckIds([])
+    setSelectedSectionNames([])
+    setBatchMode(false)
+  }
 
   function goAddCard(deckId = firstStudyDeckId) {
     if (deckId) navigate(`/cards/new/${deckId}`)
@@ -239,27 +332,77 @@ function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
 
         {libraryOpen && (
           <div className="border-t border-gray-100 p-4">
-            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {sections.map((section) => (
-                  <button key={section} type="button" onClick={() => setSelectedSection(section)} className={`rounded-full px-3 py-1.5 text-xs font-black ${selectedSection === section ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                    {section}
+            <div className="mb-4 flex flex-col gap-3">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={toggleBatchMode} className={`inline-flex h-9 items-center gap-2 rounded-full px-3 text-xs font-black transition ${batchMode ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
+                    <CheckCircleIcon size={14} /> {batchMode ? '退出批量' : '批量管理'}
                   </button>
-                ))}
+                  {batchMode && (
+                    <>
+                      <button type="button" onClick={toggleSelectAllVisible} className="h-9 rounded-full bg-gray-100 px-3 text-xs font-black text-gray-600 hover:bg-gray-200">
+                        {selectedVisibleCount === visibleDeckIds.length && visibleDeckIds.length ? '取消全选' : '全选当前卡组'}
+                      </button>
+                      <button type="button" onClick={deleteSelectedDecks} disabled={!pendingDeleteDeckIds.length && !selectedSectionNames.length} className="inline-flex h-9 items-center gap-2 rounded-full bg-red-50 px-3 text-xs font-black text-red-600 hover:bg-red-100 disabled:bg-gray-100 disabled:text-gray-300">
+                        <Trash2 size={14} /> 删除 {selectedDeckIds.length + selectedSectionNames.length || ''}
+                      </button>
+                      <span className="text-xs font-bold text-gray-400">可点下方标签选择整组删除</span>
+                    </>
+                  )}
+                </div>
+                <div className="relative w-full xl:w-72">
+                  <Search size={15} className="absolute left-3 top-2.5 text-gray-300" />
+                  <input value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="搜索卡组 / 路径" className="h-9 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm outline-none focus:border-[#007aff] focus:bg-white" />
+                </div>
               </div>
-              <div className="relative w-full lg:w-72">
-                <Search size={15} className="absolute left-3 top-2.5 text-gray-300" />
-                <input value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="搜索卡组 / 路径" className="h-9 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm outline-none focus:border-[#007aff] focus:bg-white" />
+              <div className="flex flex-wrap gap-2">
+                {sections.map((section) => {
+                  const groupSelected = selectedSectionNameSet.has(section)
+                  const disabledGroupSelect = batchMode && section === '全部'
+                  return (
+                    <button
+                      key={section}
+                      type="button"
+                      onClick={() => handleSectionClick(section)}
+                      disabled={disabledGroupSelect}
+                      title={batchMode ? (section === '全部' ? '全部不是实体分组，不能直接删除' : '选择/取消选择此分组') : '筛选此分组'}
+                      className={`rounded-full px-3 py-1.5 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        batchMode
+                          ? groupSelected
+                            ? 'bg-red-600 text-white shadow-sm'
+                            : 'bg-red-50 text-red-500 hover:bg-red-100'
+                          : selectedSection === section
+                            ? 'bg-gray-950 text-white'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                    >
+                      {batchMode && section !== '全部' ? (groupSelected ? '✓ ' : '□ ') : ''}{section}
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-              {visibleDeckRows.slice(0, 18).map((deck) => (
-                <article key={deck.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+              {visibleDeckRows.slice(0, 18).map((deck) => {
+                const selected = selectedDeckIdSet.has(deck.id)
+                return (
+                <article key={deck.id} className={`rounded-2xl border p-4 shadow-sm transition ${selected ? 'border-blue-200 bg-blue-50/60 ring-2 ring-blue-100' : 'border-gray-100 bg-white'}`}>
                   <div className="mb-3 flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-base font-black text-gray-950">{deck.name}</h3>
-                      <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{deck.description || getDeckPath(deck)}</p>
+                    <div className="flex min-w-0 gap-3">
+                      {batchMode && (
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleSelectDeck(deck.id)}
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 accent-blue-600"
+                          aria-label={`选择 ${deck.name}`}
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <h3 className="truncate text-base font-black text-gray-950">{deck.name}</h3>
+                        <p className="mt-1 line-clamp-2 text-xs font-bold text-gray-400">{deck.description || getDeckPath(deck)}</p>
+                      </div>
                     </div>
                     <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-black text-blue-600">{deck.total}</span>
                   </div>
@@ -269,12 +412,19 @@ function Decks({ data, onOpenCreateDeck, studyDeckId, cloud }) {
                     <span className="text-orange-600">薄弱 {deck.weak}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <button type="button" onClick={() => navigate(`/study/${deck.id}`)} className="h-8 rounded-lg bg-blue-50 text-xs font-black text-blue-600">学习</button>
-                    <button type="button" onClick={() => goAddCard(deck.id)} className="h-8 rounded-lg bg-gray-100 text-xs font-black text-gray-600">添加</button>
-                    <button type="button" onClick={() => navigate('/browse', { state: { deckId: deck.id } })} className="h-8 rounded-lg bg-gray-100 text-xs font-black text-gray-600">浏览</button>
+                    {batchMode ? (
+                      <button type="button" onClick={() => toggleSelectDeck(deck.id)} className="col-span-3 h-8 rounded-lg bg-blue-50 text-xs font-black text-blue-600 hover:bg-blue-100">{selected ? '取消选择' : '选择'}</button>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => navigate(`/study/${deck.id}`)} className="h-8 rounded-lg bg-blue-50 text-xs font-black text-blue-600">学习</button>
+                        <button type="button" onClick={() => goAddCard(deck.id)} className="h-8 rounded-lg bg-gray-100 text-xs font-black text-gray-600">添加</button>
+                        <button type="button" onClick={() => navigate('/browse', { state: { deckId: deck.id } })} className="h-8 rounded-lg bg-gray-100 text-xs font-black text-gray-600">浏览</button>
+                      </>
+                    )}
                   </div>
                 </article>
-              ))}
+                )
+              })}
             </div>
 
             {visibleDeckRows.length > 18 && (

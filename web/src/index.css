@@ -457,3 +457,32 @@ html.dark [class~="bg-green-500"] {
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 }
+
+/* Study anti-occlusion dock: reserve a safe visual layer for Good/Hard/Easy controls. */
+.study-grade-dock {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+@supports (backdrop-filter: blur(16px)) {
+  .study-grade-dock > div {
+    backdrop-filter: blur(22px) saturate(1.15);
+    -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  }
+}
+
+html.dark .study-grade-dock > div {
+  background-color: rgb(15 23 42 / 0.86);
+  border-color: rgb(51 65 85 / 0.82);
+  --tw-ring-color: rgb(51 65 85 / 0.72);
+}
+
+@media (max-width: 640px) {
+  .study-grade-dock {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .study-grade-dock > div {
+    border-radius: 18px;
+  }
+}

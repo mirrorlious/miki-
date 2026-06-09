@@ -1,0 +1,141 @@
+import {
+  WEB_CHOICE_BANK_CARDS_URL,
+  WEB_CHOICE_BANK_MEDIA_BASE_URL,
+} from '../config/webChoiceBankConfig'
+
+let cachedCards = null
+
+export async function loadWebChoiceCards(cardsUrl = WEB_CHOICE_BANK_CARDS_URL) {
+  if (cachedCards) return cachedCards
+  const res = await fetch(cardsUrl, { cache: 'force-cache' })
+  if (!res.ok) {
+    throw new Error(`cards.json 加载失败：${res.status}`)
+  }
+  const raw = await res.json()
+  cachedCards = Array.isArray(raw) ? raw.map(normalizeWebChoiceCard) : []
+  return cachedCards
+}
+
+export function normalizeWebChoiceCard(card) {
+  const deckPath = String(card.deck || '未分组')
+  const deckParts = deckPath.split('::').map((x) => x.trim()).filter(Boolean)
+  const answerLetters = Array.isArray(card.answerLetters)
+    ? card.answerLetters.map((x) => String(x).trim().toUpperCase()).filter(Boolean)
+    : String(card.answerLetters || '')
+        .split(/[,，、\s]+/)
+        .map((x) => x.trim().toUpperCase())
+        .filter(Boolean)
+
+  return {
+    ...card,
+    id: String(card.uid || card.noteId || `${deckPath}-${card.number}-${card.question}`),
+    noteId: card.noteId,
+    uid: card.uid,
+    number: card.number || '',
+    deckPath,
+    deckParts,
+    deckRoot: deckParts[0] || deckPath,
+    deckLeaf: deckParts[deckParts.length - 1] || deckPath,
+    subject: card.subject || '未标注科目',
+    book: card.book || '未标注章节',
+    volume: card.volume || '',
+    question: card.question || '',
+    options: Array.isArray(card.options) ? card.options : [],
+    answerLetters,
+    type: answerLetters.length > 1 ? '多选' : '单选',
+    analysis: card.analysis || '',
+    tags: Array.isArray(card.tags) ? card.tags : [],
+  }
+}
+
+export function buildWebChoiceFacets(cards) {
+  const decks = new Map()
+  const subjects = new Map()
+  const books = new Map()
+
+  for (const card of cards) {
+    addCount(decks, card.deckRoot)
+    addCount(subjects, card.subject)
+    addCount(books, card.book)
+  }
+
+  return {
+    decks: toFacetList(decks),
+    subjects: toFacetList(subjects),
+    books: toFacetList(books),
+  }
+}
+
+function addCount(map, key) {
+  const clean = key || '未分组'
+  map.set(clean, (map.get(clean) || 0) + 1)
+}
+
+function toFacetList(map) {
+  return Array.from(map.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-Hans-CN'))
+}
+
+export function filterWebChoiceCards(cards, filters = {}) {
+  const keyword = String(filters.keyword || '').trim().toLowerCase()
+  return cards.filter((card) => {
+    if (filters.deckRoot && card.deckRoot !== filters.deckRoot) return false
+    if (filters.subject && card.subject !== filters.subject) return false
+    if (filters.book && card.book !== filters.book) return false
+    if (filters.type && card.type !== filters.type) return false
+
+    if (keyword) {
+      const haystack = [
+        card.number,
+        card.question,
+        card.subject,
+        card.book,
+        card.deckPath,
+        ...(card.options || []),
+        ...(card.tags || []),
+      ]
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(keyword)) return false
+    }
+    return true
+  })
+}
+
+export function rewriteMediaUrls(html = '', mediaBaseUrl = WEB_CHOICE_BANK_MEDIA_BASE_URL) {
+  if (!html) return ''
+  const base = String(mediaBaseUrl || '').replace(/\/?$/, '/')
+  return String(html).replace(
+    /\b(src|href)=["']([^"']+)["']/gi,
+    (full, attr, url) => {
+      if (/^(https?:|data:|blob:|\/)/i.test(url)) return full
+      const cleanUrl = url.replace(/^\.?\//, '').replace(/^media\//, '')
+      return `${attr}="${base}${encodeURI(cleanUrl)}"`
+    },
+  )
+}
+
+export function sanitizeTrustedCardHtml(html = '', mediaBaseUrl = WEB_CHOICE_BANK_MEDIA_BASE_URL) {
+  // 这批 cards.json 是站内预处理数据，仍做一层轻量防护：去掉脚本和事件属性。
+  return rewriteMediaUrls(String(html || ''), mediaBaseUrl)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+=["'][^"']*["']/gi, '')
+    .replace(/\s(href|src)=["']\s*javascript:[^"']*["']/gi, '')
+}
+
+export function getStoredWebChoiceAttempt(cardId) {
+  try {
+    return JSON.parse(localStorage.getItem(`miki:web-choice:${cardId}`) || 'null')
+  } catch {
+    return null
+  }
+}
+
+export function saveStoredWebChoiceAttempt(cardId, attempt) {
+  try {
+    localStorage.setItem(`miki:web-choice:${cardId}`, JSON.stringify(attempt))
+  } catch {
+    // ignore private mode / quota errors
+  }
+}

@@ -1,6 +1,12 @@
 import { motion } from 'framer-motion'
 import CardContent from './CardContent.jsx'
 
+function getStudySideLabel({ section, revealed, isDrill }) {
+  if (section === 'note') return 'Note'
+  if (section === 'back' || revealed || String(section || '').startsWith('section:')) return 'Back'
+  return isDrill ? 'Drill · Front' : 'Front'
+}
+
 export default function StudyCardView({
   card,
   hasHtml,
@@ -16,11 +22,13 @@ export default function StudyCardView({
   onSelectSection,
   onReveal,
 }) {
+  const sideLabel = getStudySideLabel({ section, revealed, isDrill })
+
   return (
     <motion.div key={card.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl bg-white/90 border border-white shadow-sm mb-4 min-h-[460px] flex flex-col overflow-hidden ${hasHtml ? 'text-left' : 'text-center'}`}>
       <div className="h-10 border-b border-gray-200 px-4 flex items-center justify-between gap-3 text-xs text-gray-400">
         <span className="flex items-center gap-2">
-          {isDrill ? 'Drill' : 'Front'}
+          {sideLabel}
           {hasHtml && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-blue-600">HTML</span>}
         </span>
         <span className="truncate text-right">{deckLabel} · {stateLabel}</span>
@@ -80,7 +88,7 @@ export default function StudyCardView({
             ) : (
               (!hasHtml || section === 'back') && (
                 <div className={hasHtml ? '' : 'mt-10 pt-8 border-t border-gray-200'}>
-                  <p className="text-xs font-bold text-gray-400 mb-4">Back</p>
+                  {!hasHtml && <p className="text-xs font-bold text-gray-400 mb-4">Back</p>}
                   <CardContent
                     card={card}
                     side="back"

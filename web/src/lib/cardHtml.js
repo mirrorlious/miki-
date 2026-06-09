@@ -12,8 +12,6 @@ function getCardSideText(card, side) {
 
 function normalizeEditorRichText(value = '') {
   return String(value ?? '')
-    // Repair the most common malformed snippets created while wrapping an existing selection.
-    // Example: <<strong>strong>文字</strong> -> <strong>文字</strong>
     .replace(/<+([a-z][a-z0-9]*)>\1>/gi, '<$1>')
     .replace(/<+\/([a-z][a-z0-9]*)>\/\1>/gi, '</$1>')
     .replace(/<\s+(strong|em|u|s|mark|span|blockquote|ul|ol|li)(\s|>)/gi, '<$1$2')
@@ -80,7 +78,6 @@ function isScriptCallText(value = '') {
   return /^(?:decrypt|render|show|load|init)[a-zA-Z0-9_$]*\(\)$/i.test(String(value ?? '').replace(/\s+/g, ' ').trim())
 }
 
-
 function escapeHtmlText(value = '') {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -94,12 +91,41 @@ function makeTemplateFieldHtml(value = '') {
   const text = String(value ?? '')
   if (!text) return ''
   if (looksLikeHtml(text)) {
-    // Mixed rich text often comes from the in-app editor as plain text + small HTML tags.
-    // Keep real HTML, but preserve line breaks when the content is not already block-formatted.
     const hasBlockHtml = /<(?:p|div|section|article|ul|ol|li|table|blockquote|h[1-6]|br)\b/i.test(text)
     return hasBlockHtml ? text : text.replace(/\n/g, '<br>')
   }
   return escapeHtmlText(text).replace(/\n/g, '<br>')
+}
+
+function normalizeTemplateFieldName(value = '') {
+  return String(value ?? '').replace(/\s+/g, '').replace(/[：:]/g, '').trim().toLowerCase()
+}
+
+function makeTemplateFieldMap(fields = {}) {
+  const rawFront = fields.front ?? fields.Front ?? fields.正面 ?? fields.题目 ?? fields.问题 ?? fields.content ?? fields.内容 ?? ''
+  const rawBack = fields.back ?? fields.Back ?? fields.反面 ?? fields.背面 ?? fields.答案 ?? fields.解析 ?? ''
+  const rawContent = fields.content ?? fields.内容 ?? rawFront
+  const entries = {
+    ...fields,
+    Front: rawFront,
+    front: rawFront,
+    正面: rawFront,
+    题目: rawFront,
+    问题: rawFront,
+    Back: rawBack,
+    back: rawBack,
+    反面: rawBack,
+    背面: rawBack,
+    答案: rawBack,
+    解析: rawBack,
+    内容: rawContent,
+    content: rawContent,
+  }
+  const normalized = new Map()
+  for (const [key, value] of Object.entries(entries)) {
+    normalized.set(normalizeTemplateFieldName(key), makeTemplateFieldHtml(value))
+  }
+  return normalized
 }
 
 function applyCardTemplateCode(code = '', fields = {}) {
@@ -107,20 +133,39 @@ function applyCardTemplateCode(code = '', fields = {}) {
     Front: makeTemplateFieldHtml(fields.front),
     Back: makeTemplateFieldHtml(fields.back),
   }
-  return String(code || '')
+
+  let output = String(code || '')
+
+  // Basic Anki conditional sections: {{#Field}}...{{/Field}} and {{^Field}}...{{/Field}}
+  const fieldValue = (name = '') => {
+    const normalized = String(name).trim()
+    if (/^(?:Back|back|答案|解析|背面|反面|A|Answer|answer)$/i.test(normalized)) return fields.back
+    return fields.front
+  }
+
+  output = output.replace(/{{#\s*([^}]+?)\s*}}([\s\S]*?){{\/\s*\1\s*}}/g, (_, name, inner) => {
+    return String(fieldValue(name) ?? '').trim() ? inner : ''
+  })
+  output = output.replace(/{{\^\s*([^}]+?)\s*}}([\s\S]*?){{\/\s*\1\s*}}/g, (_, name, inner) => {
+    return String(fieldValue(name) ?? '').trim() ? '' : inner
+  })
+
+  output = output
     .replace(/{{\s*FrontSide\s*}}/gi, fieldHtml.Front)
-    .replace(/{{\s*(?:Front|front|问题|题目|正面)\s*}}/gi, fieldHtml.Front)
-    .replace(/{{\s*(?:Back|back|答案|解析|背面|反面)\s*}}/gi, fieldHtml.Back)
+    .replace(/{{\s*(?:Front|front|问题|题目|正面|内容|正文|Q|Question|question)\s*}}/gi, fieldHtml.Front)
+    .replace(/{{\s*(?:Back|back|答案|解析|背面|反面|A|Answer|answer)\s*}}/gi, fieldHtml.Back)
+
+  return output
 }
 
 function buildCardValueFromTemplate(form, template) {
   const selectedTemplate = template ?? SYSTEM_CARD_TEMPLATES[0]
   const isHtmlTemplate = selectedTemplate.mode === 'html'
-  const front = String(form.front ?? '').trim()
-  const back = String(form.back ?? '').trim()
+  const front = String(form.front ?? form.rawFront ?? form.content ?? '').trim()
+  const back = String(form.back ?? form.rawBack ?? '').trim()
   const frontHtml = isHtmlTemplate ? applyCardTemplateCode(selectedTemplate.frontCode || '{{Front}}', { front, back }) : ''
   const backHtml = isHtmlTemplate ? applyCardTemplateCode(selectedTemplate.backCode || '{{Back}}', { front, back }) : ''
-  const frontText = isHtmlTemplate ? htmlToPlainText(frontHtml) || htmlToPlainText(front) || 'HTML 正面' : front
+  const frontText = isHtmlTemplate ? htmlToPlainText(frontHtml) || htmlToPlainText(front) || front || 'HTML 正面' : front
   const backText = isHtmlTemplate ? htmlToPlainText(backHtml) || htmlToPlainText(back) || back : back
 
   const isBuiltInSystemTemplate = SYSTEM_CARD_TEMPLATES.some((item) => item.id === selectedTemplate.id)
@@ -133,6 +178,7 @@ function buildCardValueFromTemplate(form, template) {
     template: selectedTemplate.id,
     ...(frontHtml ? { frontHtml } : {}),
     ...(backHtml ? { backHtml } : {}),
+    // System templates are resolved live from cardTemplates.js so template edits affect old cards.
     ...(isHtmlTemplate && selectedTemplate.css && !isBuiltInSystemTemplate ? { cardCss: selectedTemplate.css } : {}),
     ...(isHtmlTemplate && selectedTemplate.js && !isBuiltInSystemTemplate ? { cardJs: selectedTemplate.js } : {}),
   }

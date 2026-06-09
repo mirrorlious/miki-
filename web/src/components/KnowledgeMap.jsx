@@ -178,7 +178,8 @@ function getReviewInfo(card) {
   const reps = Number(card?.review?.reps ?? 0) || 0
   const interval = Number(card?.review?.interval ?? 0) || 0
   const grade = Number(card?.review?.lastGrade)
-  const weak = Boolean(card?.flagged || card?.flagColor || Number(card?.review?.lapses ?? 0) > 0 || grade === 0 || grade === 1)
+  const started = Number(card?.review?.reps ?? 0) > 0
+  const weak = started && Boolean(card?.flagged || card?.flagColor || Number(card?.review?.lapses ?? 0) > 0 || grade === 0 || grade === 1)
   const due = isCardDue(card)
   const fresh = isNewCard(card) || reps === 0
   const mastered = !due && !weak && reps > 0 && interval >= 7
