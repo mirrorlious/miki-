@@ -1,12 +1,11 @@
 import { useState, useContext } from 'react'
 import { Link } from 'react-router-dom'
-import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch, BookOpen, X } from 'lucide-react'
+import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch } from 'lucide-react'
 import { stats, STORAGE_KEY } from '../data.js'
 import { ThemeContext } from '../lib/theme.js'
 import { getProfile } from '../lib/profile.js'
 import ToolbarButton from './ToolbarButton.jsx'
 import AuthDialog from './AuthDialog.jsx'
-import WebChoiceBank from './WebChoiceBank.jsx'
 
 const SHELL_WIDTH_STORAGE_KEY = `${STORAGE_KEY}:shellWidth`
 
@@ -60,7 +59,6 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
       : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
-  const [choiceBankOpen, setChoiceBankOpen] = useState(false)
   const [shellWidth, setShellWidth] = useState(() => {
     try { return localStorage.getItem(SHELL_WIDTH_STORAGE_KEY) || (wide ? 'wide' : 'normal') }
     catch { return wide ? 'wide' : 'normal' }
@@ -90,7 +88,6 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
   }
 
   const syncBusy = cloud.syncState === 'syncing' || cloud.syncState === 'connecting'
-  const canOpenChoiceBank = Boolean(cloud.user)
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f5f5f7] text-gray-950 font-sans">
@@ -117,19 +114,8 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
 
           <nav className="hidden h-11 rounded-xl bg-gray-200/70 p-1 lg:flex items-center gap-1">
             {navItems.map((item) => (
-              <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
+              <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} compactExpand />
             ))}
-            {canOpenChoiceBank && (
-              <button
-                type="button"
-                onClick={() => setChoiceBankOpen(true)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-black text-gray-600 transition-colors hover:bg-white hover:text-[#007aff]"
-                title="打开内置网站版选择题库"
-              >
-                <BookOpen size={15} />
-                题库
-              </button>
-            )}
           </nav>
 
           <div className="flex min-w-0 shrink items-center justify-end gap-1 text-xs text-gray-500 sm:gap-2">
@@ -139,16 +125,6 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
                 <span className="hidden sm:inline">待复习</span>
                 <span>{summary.dueToday}</span>
               </span>
-              {canOpenChoiceBank && (
-                <button
-                  type="button"
-                  onClick={() => setChoiceBankOpen(true)}
-                  title="内置题库"
-                  className="grid h-8 w-8 place-items-center rounded-xl text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700 lg:hidden"
-                >
-                  <BookOpen size={14} />
-                </button>
-              )}
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -166,38 +142,38 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
               >
                 <Maximize2 size={14} />
               </button>
-            {cloud.enabled && cloud.user ? (
-              <button
-                type="button"
-                onClick={cloud.onManualSync}
-                disabled={syncBusy}
-                title={syncTitle}
-                className={`grid h-8 w-[74px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 sm:w-[94px] sm:grid-cols-[14px_1fr_auto] ${syncPillClass}`}
-              >
-                <Cloud size={14} className={syncIconClass} />
-                <span className="whitespace-nowrap">{syncLabel}</span>
-                <span className="hidden font-mono text-[10px] font-black tabular-nums text-gray-400 sm:inline">{syncTimeLabel}</span>
-              </button>
-            ) : (
-              <span className={`grid h-8 w-[78px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black ${syncPillClass}`} title={syncTitle || cloud.message}>
-                {cloud.enabled ? <Cloud size={14} className={syncIconClass} /> : <CloudOff size={14} className={syncIconClass} />}
-                <span className="whitespace-nowrap">{syncLabel}</span>
-              </span>
-            )}
-            <Link to="/profile" className="flex h-8 max-w-[64px] min-w-[34px] items-center rounded-xl px-2 transition-colors hover:bg-gray-50 sm:max-w-[104px] sm:min-w-[48px]" title={profile.nickname}>
-              <span className="block truncate text-[11px] font-black text-gray-800">{profile.nickname}</span>
-            </Link>
-            {cloud.enabled && !cloud.user && (
-              <button type="button" onClick={openAuthDialog} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-700 transition-colors hover:bg-gray-50">
-                <LogIn size={13} /> 登录
-              </button>
-            )}
-            {cloud.enabled && cloud.user && (
-              <button type="button" onClick={cloud.onSignOut} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900" title={`退出 ${cloud.accountLabel}`}>
-                <LogOut size={13} />
-                <span className="hidden xl:inline">退出</span>
-              </button>
-            )}
+              {cloud.enabled && cloud.user ? (
+                <button
+                  type="button"
+                  onClick={cloud.onManualSync}
+                  disabled={syncBusy}
+                  title={syncTitle}
+                  className={`grid h-8 w-[74px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black transition-colors disabled:cursor-wait disabled:opacity-70 sm:w-[94px] sm:grid-cols-[14px_1fr_auto] ${syncPillClass}`}
+                >
+                  <Cloud size={14} className={syncIconClass} />
+                  <span className="whitespace-nowrap">{syncLabel}</span>
+                  <span className="hidden font-mono text-[10px] font-black tabular-nums text-gray-400 sm:inline">{syncTimeLabel}</span>
+                </button>
+              ) : (
+                <span className={`grid h-8 w-[78px] grid-cols-[14px_1fr] items-center gap-1.5 rounded-xl px-2 text-[11px] font-black ${syncPillClass}`} title={syncTitle || cloud.message}>
+                  {cloud.enabled ? <Cloud size={14} className={syncIconClass} /> : <CloudOff size={14} className={syncIconClass} />}
+                  <span className="whitespace-nowrap">{syncLabel}</span>
+                </span>
+              )}
+              <Link to="/profile" className="flex h-8 max-w-[64px] min-w-[34px] items-center rounded-xl px-2 transition-colors hover:bg-gray-50 sm:max-w-[104px] sm:min-w-[48px]" title={profile.nickname}>
+                <span className="block truncate text-[11px] font-black text-gray-800">{profile.nickname}</span>
+              </Link>
+              {cloud.enabled && !cloud.user && (
+                <button type="button" onClick={openAuthDialog} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-700 transition-colors hover:bg-gray-50">
+                  <LogIn size={13} /> 登录
+                </button>
+              )}
+              {cloud.enabled && cloud.user && (
+                <button type="button" onClick={cloud.onSignOut} className="inline-flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-black text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900" title={`退出 ${cloud.accountLabel}`}>
+                  <LogOut size={13} />
+                  <span className="hidden xl:inline">退出</span>
+                </button>
+              )}
             </div>
             {latestSyncAt && <span className="sr-only">最近同步 {formatSyncTime(latestSyncAt)}</span>}
           </div>
@@ -207,48 +183,14 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
           {navItems.map((item) => (
             <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
           ))}
-          {canOpenChoiceBank && (
-            <button
-              type="button"
-              onClick={() => setChoiceBankOpen(true)}
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 text-xs font-black text-blue-600 shadow-sm ring-1 ring-white/80"
-            >
-              <BookOpen size={14} /> 题库
-            </button>
-          )}
         </nav>
       </header>
 
       <main data-shell-width={shellWidth} className={`shell-main mx-auto w-full max-w-full overflow-x-hidden ${shellWidth === 'narrow' ? 'sm:max-w-5xl' : shellWidth === 'full' ? 'sm:max-w-none' : (wide ? 'sm:max-w-[1400px]' : 'sm:max-w-6xl')} px-4 py-5 sm:px-5 sm:py-6`}>
         {children}
       </main>
-
-      {choiceBankOpen && canOpenChoiceBank && (
-        <div className="fixed inset-0 z-[80] bg-gray-950/30 p-2 backdrop-blur-sm sm:p-4" onClick={() => setChoiceBankOpen(false)}>
-          <section className="mx-auto flex h-full w-full max-w-[1500px] flex-col overflow-hidden rounded-[28px] bg-[#f5f5f7] shadow-2xl ring-1 ring-white/60" onClick={(event) => event.stopPropagation()}>
-            <div className="flex shrink-0 items-center justify-between border-b border-white/80 bg-white/80 px-4 py-3 backdrop-blur-xl sm:px-5">
-              <div>
-                <p className="text-xs font-black text-blue-600">内置题库</p>
-                <h2 className="text-base font-black text-gray-950">27法硕 ZH2000 题库</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setChoiceBankOpen(false)}
-                className="grid h-9 w-9 place-items-center rounded-full bg-gray-100 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900"
-                aria-label="关闭题库"
-              >
-                <X size={17} />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5">
-              <WebChoiceBank currentUser={cloud.user} isAuthenticated={Boolean(cloud.user)} />
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   )
 }
-
 
 export default Shell
