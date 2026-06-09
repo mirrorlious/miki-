@@ -6,6 +6,7 @@ import { ThemeContext } from '../lib/theme.js'
 import { getProfile } from '../lib/profile.js'
 import ToolbarButton from './ToolbarButton.jsx'
 import AuthDialog from './AuthDialog.jsx'
+import './Shell.css'
 
 const SHELL_WIDTH_STORAGE_KEY = `${STORAGE_KEY}:shellWidth`
 
