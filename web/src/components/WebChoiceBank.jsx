@@ -9,6 +9,9 @@ import { WEB_CHOICE_BANK_TITLE } from '../config/webChoiceBankConfig'
 import WebChoiceQuestion from './WebChoiceQuestion'
 import './WebChoiceBank.css'
 
+const SUBJECT_LIMIT = 8
+const BOOK_LIMIT = 12
+
 export default function WebChoiceBank({
   user,
   currentUser,
@@ -31,6 +34,8 @@ export default function WebChoiceBank({
   })
   const [selectedId, setSelectedId] = useState('')
   const [collapsedKeys, setCollapsedKeys] = useState(() => new Set())
+  const [showAllSubjects, setShowAllSubjects] = useState(false)
+  const [showAllBooks, setShowAllBooks] = useState(false)
 
   useEffect(() => {
     if (!allowed) return
@@ -80,6 +85,10 @@ export default function WebChoiceBank({
     setFilters((prev) => ({ ...prev, ...patch }))
   }
 
+  function toggleFilter(field, value) {
+    setFilters((prev) => ({ ...prev, [field]: prev[field] === value ? '' : value }))
+  }
+
   function resetFilters() {
     setFilters({ scopeKey: 'all', deckRoot: '', subject: '', book: '', type: '', keyword: '' })
   }
@@ -92,6 +101,9 @@ export default function WebChoiceBank({
       return next
     })
   }
+
+  const visibleSubjects = showAllSubjects ? facets.subjects : facets.subjects.slice(0, SUBJECT_LIMIT)
+  const visibleBooks = showAllBooks ? facets.books : facets.books.slice(0, BOOK_LIMIT)
 
   return (
     <div className="web-choice-bank">
@@ -145,19 +157,38 @@ export default function WebChoiceBank({
               <button type="button" onClick={resetFilters}>重置</button>
             </div>
 
-            <div className="web-choice-chips">
-              <Chip active={!filters.subject} onClick={() => updateFilter({ subject: '' })}>全部科目</Chip>
-              {facets.subjects.slice(0, 8).map((item) => (
-                <Chip key={item.name} active={filters.subject === item.name} onClick={() => updateFilter({ subject: item.name })}>
-                  {item.name}
-                </Chip>
-              ))}
-            </div>
-            <div className="web-choice-chips muted">
-              <Chip active={!filters.book} onClick={() => updateFilter({ book: '' })}>全部章节</Chip>
-              {facets.books.slice(0, 12).map((item) => (
-                <Chip key={item.name} active={filters.book === item.name} onClick={() => updateFilter({ book: item.name })}>
-                  {item.name}
+            <FilterChipGroup
+              className="web-choice-chips"
+              allLabel="全部科目"
+              field="subject"
+              items={visibleSubjects}
+              activeValue={filters.subject}
+              onClear={() => updateFilter({ subject: '' })}
+              onToggle={toggleFilter}
+              canExpand={facets.subjects.length > SUBJECT_LIMIT}
+              expanded={showAllSubjects}
+              onExpandToggle={() => setShowAllSubjects((value) => !value)}
+              hiddenCount={Math.max(0, facets.subjects.length - SUBJECT_LIMIT)}
+            />
+
+            <FilterChipGroup
+              className="web-choice-chips muted"
+              allLabel="全部章节"
+              field="book"
+              items={visibleBooks}
+              activeValue={filters.book}
+              onClear={() => updateFilter({ book: '' })}
+              onToggle={toggleFilter}
+              canExpand={facets.books.length > BOOK_LIMIT}
+              expanded={showAllBooks}
+              onExpandToggle={() => setShowAllBooks((value) => !value)}
+              hiddenCount={Math.max(0, facets.books.length - BOOK_LIMIT)}
+            />
+
+            <div className="web-choice-type-chips">
+              {['单选', '多选'].map((type) => (
+                <Chip key={type} active={filters.type === type} onClick={() => toggleFilter('type', type)}>
+                  {type}
                 </Chip>
               ))}
             </div>
@@ -200,6 +231,24 @@ export default function WebChoiceBank({
             <WebChoiceQuestion card={selectedCard} mediaBaseUrl={mediaBaseUrl} />
           </main>
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+function FilterChipGroup({ className, allLabel, field, items, activeValue, onClear, onToggle, canExpand, expanded, onExpandToggle, hiddenCount }) {
+  return (
+    <div className={`${className} chip-group-collapsible`}>
+      <Chip active={!activeValue} onClick={onClear}>{allLabel}</Chip>
+      {items.map((item) => (
+        <Chip key={item.name} active={activeValue === item.name} onClick={() => onToggle(field, item.name)}>
+          {item.name}
+        </Chip>
+      ))}
+      {canExpand ? (
+        <button type="button" className="web-choice-chip-more" onClick={onExpandToggle}>
+          {expanded ? '收起' : `展开 ${hiddenCount}`}
+        </button>
       ) : null}
     </div>
   )
