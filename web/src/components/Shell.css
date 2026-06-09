@@ -1,0 +1,12 @@
+/* Desktop shell nav: keep icons compact, reveal labels on hover/focus. */
+@media (min-width: 1024px) {
+  .shell-main .h-52 svg path[stroke="#007AFF"] {
+    stroke-width: 2.1px !important;
+    stroke-linecap: butt !important;
+    stroke-linejoin: round !important;
+  }
+
+  .shell-main .h-52 svg circle[stroke="#007AFF"] {
+    display: none !important;
+  }
+}
