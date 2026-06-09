@@ -10,3 +10,19 @@
     display: none !important;
   }
 }
+
+/* Browse card flag menu fix:
+   BrowsePage uses nested Tailwind .group containers. The inner flag menu used
+   group-hover, so hovering the whole card could open the flag color picker.
+   Keep the menu closed by default and only open it when the actual flag wrapper
+   itself is hovered/focused. */
+.shell-main span.relative.inline-flex.shrink-0 > div.absolute.top-full {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.shell-main span.relative.inline-flex.shrink-0:hover > div.absolute.top-full,
+.shell-main span.relative.inline-flex.shrink-0:focus-within > div.absolute.top-full {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
