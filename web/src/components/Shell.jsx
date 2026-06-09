@@ -1,11 +1,12 @@
 import { useState, useContext } from 'react'
 import { Link } from 'react-router-dom'
-import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch } from 'lucide-react'
+import { Layers3, Sun, Moon, Maximize2, Cloud, CloudOff, LogIn, LogOut, LayoutDashboard, AlignLeft, FolderOpen, Target, User, GitBranch, BookOpen, X } from 'lucide-react'
 import { stats, STORAGE_KEY } from '../data.js'
 import { ThemeContext } from '../lib/theme.js'
 import { getProfile } from '../lib/profile.js'
 import ToolbarButton from './ToolbarButton.jsx'
 import AuthDialog from './AuthDialog.jsx'
+import WebChoiceBank from './WebChoiceBank.jsx'
 
 const SHELL_WIDTH_STORAGE_KEY = `${STORAGE_KEY}:shellWidth`
 
@@ -59,9 +60,10 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
       : 'bg-gray-50 text-gray-400'
   const profile = getProfile(data, cloud)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
+  const [choiceBankOpen, setChoiceBankOpen] = useState(false)
   const [shellWidth, setShellWidth] = useState(() => {
-    try { return localStorage.getItem(SHELL_WIDTH_STORAGE_KEY) || (wide ? "wide" : "normal") }
-    catch { return wide ? "wide" : "normal" }
+    try { return localStorage.getItem(SHELL_WIDTH_STORAGE_KEY) || (wide ? 'wide' : 'normal') }
+    catch { return wide ? 'wide' : 'normal' }
   })
   const isDarkTheme = theme === 'dark'
 
@@ -79,7 +81,16 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
     setAuthDialogOpen(true)
   }
 
+  function cycleShellWidth() {
+    const presets = wide ? ['narrow', 'wide', 'full'] : ['narrow', 'normal', 'full']
+    const idx = presets.indexOf(shellWidth)
+    const next = presets[(idx + 1) % presets.length]
+    setShellWidth(next)
+    try { localStorage.setItem(SHELL_WIDTH_STORAGE_KEY, next) } catch {}
+  }
+
   const syncBusy = cloud.syncState === 'syncing' || cloud.syncState === 'connecting'
+  const canOpenChoiceBank = Boolean(cloud.user)
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f5f5f7] text-gray-950 font-sans">
@@ -108,6 +119,17 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
             {navItems.map((item) => (
               <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
             ))}
+            {canOpenChoiceBank && (
+              <button
+                type="button"
+                onClick={() => setChoiceBankOpen(true)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-black text-gray-600 transition-colors hover:bg-white hover:text-[#007aff]"
+                title="打开内置网站版选择题库"
+              >
+                <BookOpen size={15} />
+                题库
+              </button>
+            )}
           </nav>
 
           <div className="flex min-w-0 shrink items-center justify-end gap-1 text-xs text-gray-500 sm:gap-2">
@@ -117,20 +139,33 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
                 <span className="hidden sm:inline">待复习</span>
                 <span>{summary.dueToday}</span>
               </span>
+              {canOpenChoiceBank && (
+                <button
+                  type="button"
+                  onClick={() => setChoiceBankOpen(true)}
+                  title="内置题库"
+                  className="grid h-8 w-8 place-items-center rounded-xl text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700 lg:hidden"
+                >
+                  <BookOpen size={14} />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={toggleTheme}
-                title={isDarkTheme ? 
-'切换到浅色' : '切换到深色'
-}
-                aria-label={isDarkTheme ? 
-'切换到浅色' : '切换到深色'
-}
+                title={isDarkTheme ? '切换到浅色' : '切换到深色'}
+                aria-label={isDarkTheme ? '切换到浅色' : '切换到深色'}
                 className="grid h-8 w-8 place-items-center rounded-xl text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
               >
                 {isDarkTheme ? <Sun size={14} /> : <Moon size={14} />}
               </button>
-              <button type="button" onClick={() => { const presets = wide ? ["narrow","wide","full"] : ["narrow","normal","full"]; const idx = presets.indexOf(shellWidth); const next = presets[(idx + 1) % presets.length]; setShellWidth(next); try { localStorage.setItem(SHELL_WIDTH_STORAGE_KEY, next) } catch {} }} title={`宽度：${shellWidth === "narrow" ? "窄" : shellWidth === "full" ? "全宽" : "默认"} → 点此切换`} className="grid h-8 w-8 place-items-center rounded-xl text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"> <Maximize2 size={14} /> </button>
+              <button
+                type="button"
+                onClick={cycleShellWidth}
+                title={`宽度：${shellWidth === 'narrow' ? '窄' : shellWidth === 'full' ? '全宽' : '默认'} → 点此切换`}
+                className="grid h-8 w-8 place-items-center rounded-xl text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-900"
+              >
+                <Maximize2 size={14} />
+              </button>
             {cloud.enabled && cloud.user ? (
               <button
                 type="button"
@@ -172,12 +207,45 @@ function Shell({ children, data, cloud, studyDeckId, wide = false }) {
           {navItems.map((item) => (
             <ToolbarButton key={item.to} to={item.disabled ? '/decks' : item.to} icon={item.icon} label={item.label} disabled={item.disabled} />
           ))}
+          {canOpenChoiceBank && (
+            <button
+              type="button"
+              onClick={() => setChoiceBankOpen(true)}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 text-xs font-black text-blue-600 shadow-sm ring-1 ring-white/80"
+            >
+              <BookOpen size={14} /> 题库
+            </button>
+          )}
         </nav>
       </header>
 
       <main data-shell-width={shellWidth} className={`shell-main mx-auto w-full max-w-full overflow-x-hidden ${shellWidth === 'narrow' ? 'sm:max-w-5xl' : shellWidth === 'full' ? 'sm:max-w-none' : (wide ? 'sm:max-w-[1400px]' : 'sm:max-w-6xl')} px-4 py-5 sm:px-5 sm:py-6`}>
         {children}
       </main>
+
+      {choiceBankOpen && canOpenChoiceBank && (
+        <div className="fixed inset-0 z-[80] bg-gray-950/30 p-2 backdrop-blur-sm sm:p-4" onClick={() => setChoiceBankOpen(false)}>
+          <section className="mx-auto flex h-full w-full max-w-[1500px] flex-col overflow-hidden rounded-[28px] bg-[#f5f5f7] shadow-2xl ring-1 ring-white/60" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between border-b border-white/80 bg-white/80 px-4 py-3 backdrop-blur-xl sm:px-5">
+              <div>
+                <p className="text-xs font-black text-blue-600">内置题库</p>
+                <h2 className="text-base font-black text-gray-950">27法硕 ZH2000 题库</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChoiceBankOpen(false)}
+                className="grid h-9 w-9 place-items-center rounded-full bg-gray-100 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900"
+                aria-label="关闭题库"
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5">
+              <WebChoiceBank currentUser={cloud.user} isAuthenticated={Boolean(cloud.user)} />
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
