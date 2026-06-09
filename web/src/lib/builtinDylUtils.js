@@ -62,6 +62,16 @@ function getAnswerLetters(card = {}) {
     .filter(Boolean)
 }
 
+function isRawWebChoiceCard(card = {}) {
+  return Boolean(card?.question && Array.isArray(card?.options) && (Array.isArray(card?.answerLetters) || card?.rawEncryptedAnswer || card?.analysis))
+}
+
+function isRawWebChoiceBundle(bundle = {}) {
+  const cards = Array.isArray(bundle.cards) ? bundle.cards : []
+  if (!cards.length) return false
+  return cards.slice(0, Math.min(cards.length, 20)).every(isRawWebChoiceCard)
+}
+
 function makeChoiceFront(card = {}) {
   const answerLetters = getAnswerLetters(card)
   const typeLabel = answerLetters.length > 1 ? '多选' : '单选'
@@ -95,10 +105,12 @@ function normalizeZh2000Card(card = {}, index = 0) {
   const typeLabel = answerLetters.length > 1 ? '多选' : '单选'
   const subject = normalizePart(card.subject)
   const book = normalizePart(card.book)
+  const volume = normalizePart(card.volume)
   const tags = Array.from(new Set([
     ...(Array.isArray(card.tags) ? card.tags.map(normalizePart) : []),
     subject,
     book,
+    volume,
     typeLabel,
   ].filter(Boolean)))
   const front = makeChoiceFront(card)
@@ -129,7 +141,7 @@ function normalizeZh2000Card(card = {}, index = 0) {
       deckPath,
       subject,
       book,
-      volume: normalizePart(card.volume),
+      volume,
     },
     createdAt: 1779453680000 + index,
     review: card.review ?? { dueDate: '', interval: 0, ease: 2.5, reps: 0, lapses: 0, lastGrade: null },
@@ -144,6 +156,10 @@ function normalizeBuiltinBundleCards(cards = []) {
 function mergeBuiltinDylData(data, bundle, signedIn) {
   const cleanData = stripBuiltinDylItems(data)
   if (!signedIn || !bundle?.loaded) return cleanData
+
+  // ZH2000 已经改为 Shell 顶部“题库”入口的独立网站版组件。
+  // 这里不再把 raw cards.json 强行转成普通卡片，避免浏览/学习页缺失专属答题面板和解析界面。
+  if (isRawWebChoiceBundle(bundle)) return cleanData
 
   const baseCards = normalizeBuiltinBundleCards(Array.isArray(bundle.cards) ? bundle.cards : [])
   const overrides = new Map(data.cards.filter(isBuiltinDylItem).map((card) => [card.id, card]))
