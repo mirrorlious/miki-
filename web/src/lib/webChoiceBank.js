@@ -25,6 +25,9 @@ export function normalizeWebChoiceCard(card) {
         .split(/[,，、\s]+/)
         .map((x) => x.trim().toUpperCase())
         .filter(Boolean)
+  const subject = card.subject || '未标注科目'
+  const book = card.book || '未标注章节'
+  const pathKeys = deckParts.map((_, index) => makeScopeKey(deckParts.slice(0, index + 1)))
 
   return {
     ...card,
@@ -36,8 +39,8 @@ export function normalizeWebChoiceCard(card) {
     deckParts,
     deckRoot: deckParts[0] || deckPath,
     deckLeaf: deckParts[deckParts.length - 1] || deckPath,
-    subject: card.subject || '未标注科目',
-    book: card.book || '未标注章节',
+    subject,
+    book,
     volume: card.volume || '',
     question: card.question || '',
     options: Array.isArray(card.options) ? card.options : [],
@@ -45,7 +48,72 @@ export function normalizeWebChoiceCard(card) {
     type: answerLetters.length > 1 ? '多选' : '单选',
     analysis: card.analysis || '',
     tags: Array.isArray(card.tags) ? card.tags : [],
+    scopeKeys: ['all', ...pathKeys, `subject:${subject}`, `book:${book}`],
   }
+}
+
+export function makeScopeKey(parts = []) {
+  return Array.isArray(parts) && parts.length ? parts.join('::') : 'all'
+}
+
+export function buildWebChoiceOutline(cards = []) {
+  const root = makeOutlineNode({ key: 'all', label: '全部题目', depth: 0 })
+  const nodeMap = new Map([[root.key, root]])
+
+  for (const card of cards) {
+    root.count += 1
+    root.cardIds.push(card.id)
+    const parts = Array.isArray(card.deckParts) && card.deckParts.length ? card.deckParts : ['未分组']
+    let parent = root
+    for (let index = 0; index < parts.length; index += 1) {
+      const currentParts = parts.slice(0, index + 1)
+      const key = makeScopeKey(currentParts)
+      let node = nodeMap.get(key)
+      if (!node) {
+        node = makeOutlineNode({
+          key,
+          label: parts[index],
+          pathLabel: currentParts.join(' / '),
+          depth: index + 1,
+        })
+        nodeMap.set(key, node)
+        parent.children.push(node)
+      }
+      node.count += 1
+      node.cardIds.push(card.id)
+      parent = node
+    }
+  }
+
+  sortOutline(root)
+  return root
+}
+
+function makeOutlineNode({ key, label, pathLabel, depth }) {
+  return {
+    key,
+    label,
+    pathLabel: pathLabel || label,
+    depth,
+    count: 0,
+    cardIds: [],
+    children: [],
+  }
+}
+
+function sortOutline(node) {
+  node.children.sort((a, b) => {
+    const aNum = extractLeadingNumber(a.label)
+    const bNum = extractLeadingNumber(b.label)
+    if (aNum !== null && bNum !== null && aNum !== bNum) return aNum - bNum
+    return a.label.localeCompare(b.label, 'zh-Hans-CN', { numeric: true })
+  })
+  node.children.forEach(sortOutline)
+}
+
+function extractLeadingNumber(value = '') {
+  const match = String(value).match(/^(?:第)?\s*(\d{1,4})/)
+  return match ? Number(match[1]) : null
 }
 
 export function buildWebChoiceFacets(cards) {
@@ -80,6 +148,7 @@ function toFacetList(map) {
 export function filterWebChoiceCards(cards, filters = {}) {
   const keyword = String(filters.keyword || '').trim().toLowerCase()
   return cards.filter((card) => {
+    if (filters.scopeKey && filters.scopeKey !== 'all' && !card.scopeKeys?.includes(filters.scopeKey)) return false
     if (filters.deckRoot && card.deckRoot !== filters.deckRoot) return false
     if (filters.subject && card.subject !== filters.subject) return false
     if (filters.book && card.book !== filters.book) return false
