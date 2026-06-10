@@ -248,6 +248,72 @@
   letter-spacing: -0.08em;
 }
 
+.wm-countdown-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 220px) minmax(180px, 1.4fr) auto;
+  gap: 10px;
+  align-items: end;
+  border: 2px solid #073ea8;
+  background: #fff;
+  padding: 14px;
+}
+
+.wm-countdown-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.wm-countdown-editor label span {
+  color: #073ea8;
+  font-size: 12px;
+  font-weight: 1000;
+  letter-spacing: 0.12em;
+}
+
+.wm-countdown-editor input {
+  width: 100%;
+  border: 1.5px solid rgba(7, 62, 168, 0.35);
+  background: #f7f9ff;
+  color: #061226;
+  min-height: 40px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 850;
+  outline: none;
+}
+
+.wm-countdown-editor input:focus {
+  border-color: #073ea8;
+  background: #fff;
+}
+
+.wm-countdown-editor > div {
+  display: flex;
+  gap: 8px;
+}
+
+.wm-countdown-editor > div button {
+  border: 2px solid #073ea8;
+  min-height: 40px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.wm-countdown-editor > div button:first-child {
+  background: #073ea8;
+  color: #fff;
+}
+
+.wm-countdown-editor > div button:last-child {
+  background: #fff;
+  color: #073ea8;
+}
+
 .wm-answer-panel {
   margin-top: 18px;
   border-radius: 0;
@@ -280,7 +346,8 @@
     justify-content: flex-start;
   }
 
-  .wm-countdown {
+  .wm-countdown,
+  .wm-countdown-editor {
     grid-template-columns: 1fr;
   }
 
