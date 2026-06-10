@@ -6,6 +6,7 @@ import {
 } from '../lib/webChoiceBank'
 import { WEB_CHOICE_BANK_MEDIA_BASE_URL } from '../config/webChoiceBankConfig'
 import './WebChoiceBank.css'
+import './WebChoiceBank.drill.css'
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 
