@@ -7,12 +7,34 @@ import {
 import { WEB_CHOICE_BANK_MEDIA_BASE_URL } from '../config/webChoiceBankConfig'
 import './WebChoiceBank.css'
 import './WebChoiceBank.drill.css'
+import './WebChoiceWorldModel.css'
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 
 function isCorrectSelection(selected = [], answers = []) {
   const answerSet = new Set(answers || [])
   return selected.length === answerSet.size && selected.every((letter) => answerSet.has(letter))
+}
+
+function getOptionLabel(index) {
+  const labels = ['OPTION', 'MEMORY', 'KNOWLEDGE', 'STORY']
+  return labels[index] || `CHOICE ${index + 1}`
+}
+
+function stripHtmlToText(value = '') {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function makeTakeaway(card, revealed, answers, currentCorrect, skipped) {
+  if (!revealed) return '先选，再看解析。把题目当作一个小场景来理解。'
+  const analysisText = stripHtmlToText(card?.analysis || '')
+  if (analysisText) return analysisText.slice(0, 78) + (analysisText.length > 78 ? '…' : '')
+  if (skipped) return `本题正确答案：${answers.join('、') || '暂无'}。`
+  return currentCorrect ? '这题已经打通，继续保持节奏。' : `关键变化：正确答案是 ${answers.join('、') || '暂无'}，回看选项差异。`
 }
 
 export default function WebChoiceQuestion({
@@ -58,6 +80,13 @@ export default function WebChoiceQuestion({
   const isMulti = answers.length > 1
   const currentCorrect = isCorrectSelection(selected, answers)
   const hasSelection = selected.length > 0
+  const analysisHtml = sanitizeTrustedCardHtml(card.analysis || '', mediaBaseUrl)
+  const hasTotal = total > 0
+  const canGoPrev = hasTotal ? currentIndex > 0 : Boolean(onPrev)
+  const canGoNext = hasTotal ? currentIndex < total - 1 : Boolean(onNext)
+  const progressNow = hasTotal ? currentIndex + 1 : Number(card.number || 0) || 1
+  const progressTotal = hasTotal ? total : 5
+  const takeaway = makeTakeaway(card, revealed, answers, currentCorrect, skipped)
 
   function toggleOption(letter) {
     if (revealed) return
@@ -96,13 +125,8 @@ export default function WebChoiceQuestion({
     onReset?.(card, attempt)
   }
 
-  const analysisHtml = sanitizeTrustedCardHtml(card.analysis || '', mediaBaseUrl)
-  const hasTotal = total > 0
-  const canGoPrev = hasTotal ? currentIndex > 0 : Boolean(onPrev)
-  const canGoNext = hasTotal ? currentIndex < total - 1 : Boolean(onNext)
-
   return (
-    <article className={`web-choice-question ${compact ? 'compact' : ''}`}>
+    <article className={`web-choice-question web-choice-world ${compact ? 'compact' : ''}`}>
       {hasTotal ? (
         <div className="web-choice-practice-bar">
           <button type="button" className="web-choice-nav-btn" onClick={onPrev} disabled={!canGoPrev}>上一题</button>
@@ -114,93 +138,99 @@ export default function WebChoiceQuestion({
         </div>
       ) : null}
 
-      <div className="web-choice-question-header">
-        <div>
-          <div className="web-choice-meta">
-            <span>{card.type}</span>
-            <span>{card.subject}</span>
-            {card.volume ? <span>{card.volume}</span> : null}
-            {card.book ? <span>{card.book}</span> : null}
-          </div>
+      <div className="wm-card">
+        <header className="wm-topline">
+          <div className="wm-kicker">ZH2000 / {card.subject || 'QUESTION BANK'}</div>
+          <div className="wm-count">{String(progressNow).padStart(2, '0')} / {String(progressTotal).padStart(2, '0')}</div>
+        </header>
+
+        <section className="wm-title-block">
+          <div className="wm-blue-label">NOT JUST OPTIONS</div>
           <h2>{card.question}</h2>
+        </section>
+
+        <div className="wm-meta-row">
+          <span>{card.type}</span>
+          {card.volume ? <span>{card.volume}</span> : null}
+          {card.book ? <span>{card.book}</span> : null}
+          {card.number ? <span>#{card.number}</span> : null}
         </div>
-        <div className="web-choice-number">#{card.number || '-'}</div>
-      </div>
 
-      {card.tags?.length ? (
-        <div className="web-choice-tags">
-          {card.tags.map((tag) => (
-            <span key={tag}>{tag}</span>
-          ))}
+        <div className="wm-option-grid">
+          {(card.options || []).map((option, index) => {
+            const letter = LETTERS[index]
+            const picked = selectedSet.has(letter)
+            const correct = answerSet.has(letter)
+            const className = [
+              'wm-option-card',
+              picked ? 'is-picked' : '',
+              revealed && correct ? 'is-correct' : '',
+              revealed && picked && !correct ? 'is-wrong' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+
+            return (
+              <button
+                type="button"
+                key={`${letter}-${option}`}
+                className={className}
+                onClick={() => toggleOption(letter)}
+              >
+                <span className="wm-option-kicker">{letter} / {getOptionLabel(index)}</span>
+                <strong>{option}</strong>
+              </button>
+            )
+          })}
         </div>
-      ) : null}
 
-      <div className="web-choice-options">
-        {(card.options || []).map((option, index) => {
-          const letter = LETTERS[index]
-          const picked = selectedSet.has(letter)
-          const correct = answerSet.has(letter)
-          const className = [
-            'web-choice-option',
-            picked ? 'is-picked' : '',
-            revealed && correct ? 'is-correct' : '',
-            revealed && picked && !correct ? 'is-wrong' : '',
-          ]
-            .filter(Boolean)
-            .join(' ')
-
-          return (
-            <button
-              type="button"
-              key={`${letter}-${option}`}
-              className={className}
-              onClick={() => toggleOption(letter)}
-            >
-              <b>{letter}.</b>
-              <span>{option}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <div className="web-choice-actions practice-actions">
-        {!revealed ? (
-          <>
-            <button
-              type="button"
-              className="web-choice-primary"
-              onClick={() => finishAttempt({ direct: false })}
-              disabled={!hasSelection}
-              title={hasSelection ? '提交并判定正误' : '先选择一个选项'}
-            >
-              提交答案
-            </button>
-            <button type="button" className="web-choice-secondary" onClick={() => finishAttempt({ direct: true })}>
-              直接看答案
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="web-choice-primary" onClick={onNext} disabled={!canGoNext}>
-              下一题
-            </button>
-            <button type="button" className="web-choice-secondary" onClick={reset}>
-              重做本题
-            </button>
-          </>
-        )}
-        {showNext && !revealed ? (
-          <button type="button" className="web-choice-next" onClick={onNext} disabled={!canGoNext}>
-            跳过
+        <div className="wm-actions">
+          {!revealed ? (
+            <>
+              <button
+                type="button"
+                className="wm-primary"
+                onClick={() => finishAttempt({ direct: false })}
+                disabled={!hasSelection}
+                title={hasSelection ? '提交并判定正误' : '先选择一个选项'}
+              >
+                提交答案
+              </button>
+              <button type="button" className="wm-secondary" onClick={() => finishAttempt({ direct: true })}>
+                直接看答案
+              </button>
+              {showNext ? (
+                <button type="button" className="wm-secondary" onClick={onNext} disabled={!canGoNext}>
+                  跳过
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <button type="button" className="wm-primary" onClick={onNext} disabled={!canGoNext}>
+                下一题
+              </button>
+              <button type="button" className="wm-secondary" onClick={reset}>
+                重做本题
+              </button>
+            </>
+          )}
+          <button type="button" className={`wm-secondary wm-wrong ${wrongBook ? 'active' : ''}`} onClick={() => onToggleWrongBook?.(card)}>
+            {wrongBook ? '移出错题本' : '加入错题本'}
           </button>
-        ) : null}
-        <button type="button" className={`web-choice-wrong-toggle ${wrongBook ? 'active' : ''}`} onClick={() => onToggleWrongBook?.(card)}>
-          {wrongBook ? '移出错题本' : '加入错题本'}
-        </button>
+        </div>
+
+        <footer className="wm-takeaway">
+          <div>
+            <span>TAKEAWAY</span>
+            <p>{takeaway}</p>
+          </div>
+          <b>{selected.length ? selected.join('') : '?'}</b>
+        </footer>
       </div>
 
       {revealed ? (
-        <section className={`web-choice-answer-panel ${currentCorrect ? 'is-correct' : 'is-wrong'}`}>
+        <section className={`web-choice-answer-panel wm-answer-panel ${currentCorrect ? 'is-correct' : 'is-wrong'}`}>
           <div className="web-choice-result-title">
             {skipped ? '已查看答案' : currentCorrect ? '回答正确' : '回答错误'}
           </div>
