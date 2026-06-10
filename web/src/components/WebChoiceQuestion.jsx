@@ -18,26 +18,29 @@ function isCorrectSelection(selected = [], answers = []) {
 export default function WebChoiceQuestion({
   card,
   mediaBaseUrl = WEB_CHOICE_BANK_MEDIA_BASE_URL,
+  storedAttempt = null,
   onAttempt,
   onReset,
   onPrev,
   onNext,
+  onToggleWrongBook,
+  wrongBook = false,
   showNext = false,
   compact = false,
   currentIndex = 0,
   total = 0,
 }) {
-  const previousAttempt = useMemo(() => getStoredWebChoiceAttempt(card?.id), [card?.id])
+  const previousAttempt = useMemo(() => storedAttempt || getStoredWebChoiceAttempt(card?.id), [card?.id, storedAttempt])
   const [selected, setSelected] = useState(previousAttempt?.selected || [])
   const [revealed, setRevealed] = useState(Boolean(previousAttempt?.revealed))
   const [skipped, setSkipped] = useState(Boolean(previousAttempt?.skipped))
 
   useEffect(() => {
-    const attempt = getStoredWebChoiceAttempt(card?.id)
+    const attempt = storedAttempt || getStoredWebChoiceAttempt(card?.id)
     setSelected(attempt?.selected || [])
     setRevealed(Boolean(attempt?.revealed))
     setSkipped(Boolean(attempt?.skipped))
-  }, [card?.id])
+  }, [card?.id, storedAttempt])
 
   if (!card) {
     return (
@@ -191,6 +194,9 @@ export default function WebChoiceQuestion({
             跳过
           </button>
         ) : null}
+        <button type="button" className={`web-choice-wrong-toggle ${wrongBook ? 'active' : ''}`} onClick={() => onToggleWrongBook?.(card)}>
+          {wrongBook ? '移出错题本' : '加入错题本'}
+        </button>
       </div>
 
       {revealed ? (
