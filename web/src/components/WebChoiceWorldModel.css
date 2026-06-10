@@ -41,7 +41,7 @@
 }
 
 .wm-title-block {
-  padding: clamp(34px, 4.8vw, 68px) 0 22px;
+  padding: clamp(24px, 3.8vw, 46px) 0 14px;
 }
 
 .wm-blue-label {
@@ -71,6 +71,11 @@
   margin: 6px 0 30px;
 }
 
+.wm-meta-row-top {
+  justify-content: flex-end;
+  margin: 18px 0 0;
+}
+
 .wm-meta-row span {
   border: 2px solid #073ea8;
   background: #ffffff;
@@ -86,7 +91,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 18px;
+  margin-top: 8px;
 }
 
 .wm-option-card {
@@ -269,6 +274,10 @@
 
   .wm-option-card {
     min-height: 120px;
+  }
+
+  .wm-meta-row-top {
+    justify-content: flex-start;
   }
 
   .wm-countdown {
