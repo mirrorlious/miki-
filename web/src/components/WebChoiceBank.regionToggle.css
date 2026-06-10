@@ -1,0 +1,101 @@
+.web-bank2-top-actions .web-bank2-region-toggle {
+  display: inline-grid;
+  min-width: 38px;
+  width: 38px;
+  height: 34px;
+  place-items: center;
+  border: 2px solid #ef4444;
+  border-radius: 0;
+  background: #fff;
+  color: #ef4444;
+  padding: 0;
+}
+
+.web-bank2-top-actions .web-bank2-region-toggle:hover,
+.web-bank2-top-actions .web-bank2-region-toggle.active {
+  background: #ef4444;
+  color: #fff;
+}
+
+.web-bank2-region-icon {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 16px;
+  border: 2px solid currentColor;
+  box-sizing: border-box;
+}
+
+.web-bank2-region-icon--sidebar::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: currentColor;
+}
+
+.web-bank2-region-icon--question::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 4px;
+  height: 2px;
+  background: currentColor;
+}
+
+.web-bank2-region-icon--question::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 6px;
+  bottom: 4px;
+  height: 2px;
+  background: currentColor;
+}
+
+.web-bank2.web-bank2--hide-sidebar .web-bank2-shell,
+.web-bank2.web-bank2--hide-question .web-bank2-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.web-bank2.web-bank2--hide-sidebar .web-bank2-sidebar,
+.web-bank2.web-bank2--hide-question .web-bank2-main {
+  display: none;
+}
+
+.web-bank2.web-bank2--hide-sidebar .web-bank2-main,
+.web-bank2.web-bank2--hide-question .web-bank2-sidebar {
+  min-width: 0;
+}
+
+.web-bank2.web-bank2--hide-sidebar .web-bank2 .web-choice-question,
+.web-bank2.web-bank2--hide-sidebar .web-choice-question {
+  max-width: min(1040px, 100%);
+}
+
+.web-bank2.web-bank2--hide-question .web-bank2-sidebar {
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.web-bank2.web-bank2--hide-question .web-bank2-side-scroll {
+  padding-inline: 18px;
+}
+
+@media (max-width: 820px) {
+  .web-bank2-top-actions .web-bank2-region-toggle {
+    width: 34px;
+    min-width: 34px;
+    height: 32px;
+  }
+
+  .web-bank2.web-bank2--hide-question .web-bank2-sidebar {
+    position: static;
+    width: 100%;
+    height: 100%;
+    transform: none;
+  }
+}
