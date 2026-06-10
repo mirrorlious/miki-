@@ -17,6 +17,14 @@ function getCardFlagColor(card) {
   return card?.flagColor ?? ''
 }
 
+function isBuiltinDylItem(item) {
+  return item?.builtinPack === BUILTIN_DYL_PACK_ID || item?.source?.builtinPack === BUILTIN_DYL_PACK_ID
+}
+
+function shouldPreferFullBuiltinDylHtml(card) {
+  return Boolean(isBuiltinDylItem(card) && (card?.frontHtml || card?.backHtml))
+}
+
 function getCardScopeParts(card, deckById) {
   const sourcePath = Array.isArray(card?.source?.deckPath)
     ? card.source.deckPath.map(normalizePathPart).filter(Boolean)
@@ -129,6 +137,7 @@ function looksLikeCssOnlySection(value = '') {
 
 
 function getCardHtmlSections(card) {
+  if (shouldPreferFullBuiltinDylHtml(card)) return []
   if (!Array.isArray(card?.htmlSections)) return []
   return card.htmlSections.filter((section) => {
     if (!section?.id || !section?.label || !(section.html || section.text)) return false
@@ -154,10 +163,6 @@ function isCardDue(card) {
 function getCardReviewStateLabel(card) {
   if (!hasStartedCard(card)) return '新卡'
   return isCardDue(card) ? '到期' : formatReviewDueLabel(card.review)
-}
-
-function isBuiltinDylItem(item) {
-  return item?.builtinPack === BUILTIN_DYL_PACK_ID || item?.source?.builtinPack === BUILTIN_DYL_PACK_ID
 }
 
 function getRelatedSuggestions(data, card, limit = 4) {
