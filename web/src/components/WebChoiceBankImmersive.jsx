@@ -16,6 +16,7 @@ import './WebChoiceBank.css'
 import './WebChoiceBank.drill.css'
 import './WebChoiceBank.progress.css'
 import './WebChoiceBank.immersive.css'
+import './WebChoiceBank.regionToggle.css'
 
 export default function WebChoiceBankImmersive({ user, currentUser, isAuthenticated, cardsUrl, mediaBaseUrl }) {
   const allowed = Boolean(isAuthenticated || user || currentUser)
@@ -28,6 +29,8 @@ export default function WebChoiceBankImmersive({ user, currentUser, isAuthentica
   const [tab, setTab] = useState('outline')
   const [sideOpen, setSideOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [hideSidebar, setHideSidebar] = useState(false)
+  const [hideQuestion, setHideQuestion] = useState(false)
   const [wrongOnly, setWrongOnly] = useState(false)
   const [unansweredOnly, setUnansweredOnly] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
@@ -84,6 +87,8 @@ export default function WebChoiceBankImmersive({ user, currentUser, isAuthentica
   const go = (offset) => { if (!visibleCards.length) return; const next = (Math.max(0, selectedIndex) + offset + visibleCards.length) % visibleCards.length; setSelectedId(visibleCards[next].id) }
   const toggleUnanswered = () => { setUnansweredOnly((v) => !v); if (!unansweredOnly) setWrongOnly(false) }
   const toggleWrong = () => { setWrongOnly((v) => !v); if (!wrongOnly) setUnansweredOnly(false) }
+  const toggleSidebarRegion = () => setHideSidebar((value) => { const next = !value; if (next) setHideQuestion(false); return next })
+  const toggleQuestionRegion = () => setHideQuestion((value) => { const next = !value; if (next) setHideSidebar(false); return next })
 
   function persistAttempt(card, attempt) {
     if (!card?.id) return
@@ -105,10 +110,19 @@ export default function WebChoiceBankImmersive({ user, currentUser, isAuthentica
   }
 
   return (
-    <div className={`web-bank2 ${expanded ? 'is-expanded' : ''}`}>
+    <div className={`web-bank2 ${expanded ? 'is-expanded' : ''} ${hideSidebar ? 'web-bank2--hide-sidebar' : ''} ${hideQuestion ? 'web-bank2--hide-question' : ''}`}>
       <header className="web-bank2-topbar">
         <div className="web-bank2-brand"><span className="web-bank2-logo">m!</span><span>内置题库</span><b>›</b><strong>{WEB_CHOICE_BANK_TITLE}</strong></div>
-        <div className="web-bank2-top-actions"><button type="button" onClick={() => setSideOpen((v) => !v)} className="web-bank2-mobile-filter">目录</button><button type="button" onClick={() => setExpanded((v) => !v)} title="放大 / 还原">⛶</button></div>
+        <div className="web-bank2-top-actions">
+          <button type="button" onClick={() => setSideOpen((v) => !v)} className="web-bank2-mobile-filter">目录</button>
+          <button type="button" className={`web-bank2-region-toggle ${hideSidebar ? 'active' : ''}`} onClick={toggleSidebarRegion} aria-pressed={hideSidebar} title={hideSidebar ? '显示目录区域' : '隐藏目录区域'}>
+            <span className="web-bank2-region-icon web-bank2-region-icon--sidebar" />
+          </button>
+          <button type="button" className={`web-bank2-region-toggle ${hideQuestion ? 'active' : ''}`} onClick={toggleQuestionRegion} aria-pressed={hideQuestion} title={hideQuestion ? '显示题目区域' : '隐藏题目区域'}>
+            <span className="web-bank2-region-icon web-bank2-region-icon--question" />
+          </button>
+          <button type="button" onClick={() => setExpanded((v) => !v)} title="放大 / 还原">⛶</button>
+        </div>
       </header>
       {loading ? <div className="web-choice-loading">正在加载 cards.json...</div> : null}
       {error ? <div className="web-choice-error">{error}</div> : null}
