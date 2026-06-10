@@ -30,6 +30,7 @@ export default function WebChoiceBankImmersive({ user, currentUser, isAuthentica
   const [expanded, setExpanded] = useState(false)
   const [wrongOnly, setWrongOnly] = useState(false)
   const [unansweredOnly, setUnansweredOnly] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [attempts, setAttempts] = useState({})
   const [version, setVersion] = useState(0)
 
@@ -64,7 +65,6 @@ export default function WebChoiceBankImmersive({ user, currentUser, isAuthentica
   const selectedCard = visibleCards.find((card) => card.id === selectedId) || visibleCards[0]
   const selectedIndex = selectedCard ? visibleCards.findIndex((card) => card.id === selectedCard.id) : -1
   const selectedAttempt = selectedCard ? getAttempt(selectedCard, attempts) : null
-  const activeNode = useMemo(() => findOutlineNode(outline, filters.scopeKey || 'all') || outline, [outline, filters.scopeKey])
   const stats = useMemo(() => buildStats(baseCards, attempts), [baseCards, attempts, version])
   const totalStats = useMemo(() => buildStats(cards, attempts), [cards, attempts, version])
   const accuracy = stats.done ? Math.round((stats.correct / stats.done) * 100) : 0
@@ -133,10 +133,10 @@ export default function WebChoiceBankImmersive({ user, currentUser, isAuthentica
             <div className="web-bank2-question-head">
               <div className="web-bank2-meta-line"><span className="web-bank2-type">{selectedCard?.type || filters.type || '题型'}</span><span>{selectedCard?.subject || '全部科目'}</span>{selectedCard?.volume ? <><b>›</b><span>{selectedCard.volume}</span></> : null}{selectedCard?.book ? <><b>›</b><strong>{selectedCard.book}</strong></> : null}</div>
               <div className="web-bank2-progress"><strong>{selectedIndex >= 0 ? selectedIndex + 1 : 0}</strong><span>/ {visibleCards.length || 0}</span><i><em style={{ width: `${progress}%` }} /></i></div>
-              <div className="web-bank2-mode-pills"><button type="button" className={unansweredOnly ? 'active' : ''} onClick={toggleUnanswered}>未做</button><button type="button" className={wrongOnly ? 'active' : ''} onClick={toggleWrong}>错题</button></div>
+              <div className="web-bank2-mode-pills"><button type="button" className={unansweredOnly ? 'active' : ''} onClick={toggleUnanswered}>未做</button><button type="button" className={wrongOnly ? 'active' : ''} onClick={toggleWrong}>错题</button><button type="button" className={statsOpen ? 'active' : ''} onClick={() => setStatsOpen((v) => !v)}>{statsOpen ? '收起统计' : '显示统计'}</button></div>
               <div className="web-bank2-nav"><button type="button" onClick={() => go(-1)} disabled={!visibleCards.length}>‹</button><button type="button" onClick={() => go(1)} disabled={!visibleCards.length}>›</button></div>
             </div>
-            <div className="web-bank2-stats-row"><StatPill label="已做" value={`${stats.done}/${stats.total}`} /><StatPill label="记住" value={stats.remembered} /><StatPill label="薄弱" value={stats.weak} /><StatPill label="错题本" value={stats.wrongBook} /><StatPill label="总错题" value={totalStats.wrongBook} subtle /></div>
+            {statsOpen ? <div className="web-bank2-stats-row"><StatPill label="已做" value={`${stats.done}/${stats.total}`} /><StatPill label="记住" value={stats.remembered} /><StatPill label="薄弱" value={stats.weak} /><StatPill label="错题本" value={stats.wrongBook} /><StatPill label="总错题" value={totalStats.wrongBook} subtle /></div> : null}
             <div className="web-bank2-question-scroll"><WebChoiceQuestion card={selectedCard} mediaBaseUrl={mediaBaseUrl} storedAttempt={selectedAttempt} wrongBook={Boolean(selectedAttempt?.wrongBook)} onAttempt={persistAttempt} onReset={persistAttempt} onToggleWrongBook={toggleWrongBook} onPrev={() => go(-1)} onNext={() => go(1)} showNext compact /></div>
           </section>
         </main>
