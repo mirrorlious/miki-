@@ -7,7 +7,7 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^\.\.\/apkgImport(?:\.js)?$/,
+        find: /^(?:\.\/|\.\.\/)apkgImport(?:\.js)?$/,
         replacement: fileURLToPath(new URL('./src/apkgImportCompat.js', import.meta.url)),
       },
     ],
