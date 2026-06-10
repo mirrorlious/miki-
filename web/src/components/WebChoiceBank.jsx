@@ -120,7 +120,7 @@ export default function WebChoiceBank({
   function goToOffset(offset) {
     if (!filteredCards.length) return
     const current = Math.max(0, selectedIndex)
-    const nextIndex = (current + offset + filteredCards.length) % filteredCards.length
+    const nextIndex = Math.min(Math.max(current + offset, 0), filteredCards.length - 1)
     setSelectedId(filteredCards[nextIndex].id)
   }
 
@@ -308,9 +308,12 @@ export default function WebChoiceBank({
                   mediaBaseUrl={mediaBaseUrl}
                   onAttempt={handleAttemptChange}
                   onReset={handleAttemptChange}
+                  onPrev={() => goToOffset(-1)}
                   onNext={() => goToOffset(1)}
                   showNext
                   compact
+                  currentIndex={Math.max(0, selectedIndex)}
+                  total={filteredCards.length}
                 />
               </main>
             </div>
@@ -346,8 +349,8 @@ function ChoiceDynamicIsland({ mode, total, index, stats, activeTitle, onBrowse,
         <div className="web-choice-island-actions">
           <button type="button" onClick={onBrowse} className={mode === 'browse' ? 'active' : ''}>浏览</button>
           <button type="button" onClick={onDrill} className={mode === 'drill' ? 'active' : ''}>刷题</button>
-          <button type="button" onClick={onPrev} disabled={!total}>‹</button>
-          <button type="button" onClick={onNext} disabled={!total}>›</button>
+          <button type="button" onClick={onPrev} disabled={index <= 0}>‹</button>
+          <button type="button" onClick={onNext} disabled={!total || index >= total - 1}>›</button>
         </div>
       </div>
     </div>
