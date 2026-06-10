@@ -4,11 +4,16 @@ import {
   buildWebChoiceOutline,
   filterWebChoiceCards,
   getStoredWebChoiceAttempt,
+  loadCloudWebChoiceAttempts,
   loadWebChoiceCards,
+  mergeWebChoiceAttempt,
+  saveCloudWebChoiceAttempt,
+  saveStoredWebChoiceAttempt,
 } from '../lib/webChoiceBank'
 import { WEB_CHOICE_BANK_TITLE } from '../config/webChoiceBankConfig'
 import WebChoiceQuestion from './WebChoiceQuestion'
 import './WebChoiceBank.css'
+import './WebChoiceBank.progress.css'
 
 const SUBJECT_LIMIT = 8
 const BOOK_LIMIT = 12
@@ -38,6 +43,8 @@ export default function WebChoiceBank({
   const [showAllSubjects, setShowAllSubjects] = useState(false)
   const [showAllBooks, setShowAllBooks] = useState(false)
   const [mode, setMode] = useState('browse')
+  const [wrongOnly, setWrongOnly] = useState(false)
+  const [cloudAttempts, setCloudAttempts] = useState({})
   const [attemptVersion, setAttemptVersion] = useState(0)
 
   useEffect(() => {
@@ -64,9 +71,22 @@ export default function WebChoiceBank({
     }
   }, [allowed, cardsUrl])
 
+  useEffect(() => {
+    if (!allowed) return
+    let cancelled = false
+    loadCloudWebChoiceAttempts().then((items) => {
+      if (!cancelled) setCloudAttempts(items || {})
+    })
+    return () => { cancelled = true }
+  }, [allowed])
+
   const facets = useMemo(() => buildWebChoiceFacets(cards), [cards])
   const outline = useMemo(() => buildWebChoiceOutline(cards), [cards])
-  const filteredCards = useMemo(() => filterWebChoiceCards(cards, filters), [cards, filters])
+  const baseFilteredCards = useMemo(() => filterWebChoiceCards(cards, filters), [cards, filters])
+  const filteredCards = useMemo(() => {
+    if (!wrongOnly) return baseFilteredCards
+    return baseFilteredCards.filter((card) => Boolean(getAttemptForCard(card, cloudAttempts)?.wrongBook))
+  }, [baseFilteredCards, cloudAttempts, wrongOnly, attemptVersion])
   const selectedCard = useMemo(
     () => filteredCards.find((card) => card.id === selectedId) || filteredCards[0],
     [filteredCards, selectedId],
@@ -79,7 +99,8 @@ export default function WebChoiceBank({
     () => findOutlineNode(outline, filters.scopeKey || 'all') || outline,
     [outline, filters.scopeKey],
   )
-  const drillStats = useMemo(() => buildDrillStats(filteredCards), [filteredCards, attemptVersion])
+  const drillStats = useMemo(() => buildDrillStats(baseFilteredCards, cloudAttempts), [baseFilteredCards, cloudAttempts, attemptVersion])
+  const totalStats = useMemo(() => buildDrillStats(cards, cloudAttempts), [cards, cloudAttempts, attemptVersion])
 
   useEffect(() => {
     if (filteredCards.length && !filteredCards.some((card) => card.id === selectedId)) {
@@ -99,6 +120,7 @@ export default function WebChoiceBank({
 
   function resetFilters() {
     setFilters({ scopeKey: 'all', deckRoot: '', subject: '', book: '', type: '', keyword: '' })
+    setWrongOnly(false)
   }
 
   function toggleCollapsed(key) {
@@ -120,7 +142,7 @@ export default function WebChoiceBank({
   function goToOffset(offset) {
     if (!filteredCards.length) return
     const current = Math.max(0, selectedIndex)
-    const nextIndex = Math.min(Math.max(current + offset, 0), filteredCards.length - 1)
+    const nextIndex = (current + offset + filteredCards.length) % filteredCards.length
     setSelectedId(filteredCards[nextIndex].id)
   }
 
@@ -130,12 +152,43 @@ export default function WebChoiceBank({
     setSelectedId((current) => filteredCards.some((card) => card.id === current) ? current : filteredCards[0].id)
   }
 
-  function handleAttemptChange() {
+  function persistAttempt(card, attempt) {
+    if (!card?.id) return
+    const previous = getAttemptForCard(card, cloudAttempts)
+    const merged = mergeWebChoiceAttempt(previous || {}, attempt)
+    setCloudAttempts((prev) => ({ ...prev, [card.id]: merged }))
+    saveStoredWebChoiceAttempt(card.id, merged)
+    saveCloudWebChoiceAttempt(card.id, merged)
     setAttemptVersion((value) => value + 1)
+  }
+
+  function toggleWrongBook(card) {
+    if (!card?.id) return
+    const previous = getAttemptForCard(card, cloudAttempts) || {}
+    const next = {
+      ...previous,
+      selected: Array.isArray(previous.selected) ? previous.selected : [],
+      revealed: Boolean(previous.revealed),
+      skipped: Boolean(previous.skipped),
+      correct: Boolean(previous.correct),
+      wrongBook: !previous.wrongBook,
+      mastery: previous.mastery || (!previous.wrongBook ? 'weak' : 'new'),
+      updatedAt: Date.now(),
+    }
+    setCloudAttempts((prev) => ({ ...prev, [card.id]: next }))
+    saveStoredWebChoiceAttempt(card.id, next)
+    saveCloudWebChoiceAttempt(card.id, next)
+    setAttemptVersion((value) => value + 1)
+  }
+
+  function openWrongBook() {
+    setWrongOnly((value) => !value)
+    setMode('drill')
   }
 
   const visibleSubjects = showAllSubjects ? facets.subjects : facets.subjects.slice(0, SUBJECT_LIMIT)
   const visibleBooks = showAllBooks ? facets.books : facets.books.slice(0, BOOK_LIMIT)
+  const selectedAttempt = selectedCard ? getAttemptForCard(selectedCard, cloudAttempts) : null
 
   return (
     <div className={`web-choice-bank ${mode === 'drill' ? 'is-drill-mode' : 'is-browse-mode'}`}>
@@ -143,11 +196,12 @@ export default function WebChoiceBank({
         <div>
           <div className="web-choice-kicker">内置题库 · 网站版选择题</div>
           <h1>{WEB_CHOICE_BANK_TITLE}</h1>
-          <p>浏览模式负责定位题目；刷题模式只保留题目、答案、解析和进度，让手机端也能沉浸做题。</p>
+          <p>浏览模式负责定位题目；刷题模式会记录进度、记忆状态、正确率和错题本，并同步到云端。</p>
         </div>
-        <div className="web-choice-count">
+        <div className="web-choice-count practice-count">
           <strong>{cards.length.toLocaleString()}</strong>
           <span>题</span>
+          <small>已做 {totalStats.done} · 错题 {totalStats.wrongBook}</small>
         </div>
       </header>
 
@@ -158,15 +212,19 @@ export default function WebChoiceBank({
         <>
           <ChoiceDynamicIsland
             mode={mode}
+            wrongOnly={wrongOnly}
             total={filteredCards.length}
             index={selectedIndex}
             stats={drillStats}
-            activeTitle={activeNode?.label || '全部题目'}
+            activeTitle={wrongOnly ? '错题本' : (activeNode?.label || '全部题目')}
             onBrowse={() => setMode('browse')}
             onDrill={startDrill}
+            onWrongBook={openWrongBook}
             onPrev={() => goToOffset(-1)}
             onNext={() => goToOffset(1)}
           />
+
+          <MemoryStrip stats={drillStats} />
 
           {mode === 'browse' ? (
             <div className="web-choice-layout anki-like">
@@ -237,12 +295,18 @@ export default function WebChoiceBank({
                       {type}
                     </Chip>
                   ))}
+                  <Chip active={wrongOnly} onClick={() => setWrongOnly((value) => !value)}>错题本</Chip>
                 </div>
 
-                <div className="web-choice-section-title">
+                <div className="web-choice-section-title practice-title">
                   <div>
-                    <strong>{activeNode?.label || '全部题目'}</strong>
+                    <strong>{wrongOnly ? '错题本' : (activeNode?.label || '全部题目')}</strong>
                     <span>{activeNode?.pathLabel || '全部'} · 当前 {filteredCards.length.toLocaleString()} 题</span>
+                  </div>
+                  <div className="web-choice-progress-pills">
+                    <b>已做 {drillStats.done}</b>
+                    <b>记住 {drillStats.remembered}</b>
+                    <b>错题 {drillStats.wrongBook}</b>
                   </div>
                   <button type="button" className="web-choice-section-drill" onClick={startDrill} disabled={!filteredCards.length}>
                     开始刷题
@@ -250,21 +314,25 @@ export default function WebChoiceBank({
                 </div>
 
                 <div className="web-choice-card-list card-grid">
-                  {filteredCards.slice(0, 600).map((card) => (
-                    <button
-                      type="button"
-                      key={card.id}
-                      className={`web-choice-card-row ${selectedCard?.id === card.id ? 'active' : ''}`}
-                      onClick={() => selectCard(card.id)}
-                    >
-                      <div className="web-choice-card-row-top">
-                        <strong>{card.number}. {card.question}</strong>
-                        <em>{card.type}</em>
-                      </div>
-                      <p>{makeChoiceCardPreview(card)}</p>
-                      <span>{card.book} · {card.deckLeaf}</span>
-                    </button>
-                  ))}
+                  {filteredCards.slice(0, 600).map((card) => {
+                    const attempt = getAttemptForCard(card, cloudAttempts)
+                    const status = getAttemptStatus(attempt)
+                    return (
+                      <button
+                        type="button"
+                        key={card.id}
+                        className={`web-choice-card-row ${selectedCard?.id === card.id ? 'active' : ''} ${status ? `status-${status}` : ''}`}
+                        onClick={() => selectCard(card.id)}
+                      >
+                        <div className="web-choice-card-row-top">
+                          <strong>{card.number}. {card.question}</strong>
+                          <em>{statusLabel(status) || card.type}</em>
+                        </div>
+                        <p>{makeChoiceCardPreview(card)}</p>
+                        <span>{card.book} · {card.deckLeaf}</span>
+                      </button>
+                    )
+                  })}
                   {filteredCards.length > 600 ? (
                     <div className="web-choice-list-more">
                       已显示前 600 题，请用目录、筛选或搜索缩小范围。
@@ -277,7 +345,15 @@ export default function WebChoiceBank({
               </section>
 
               <main className="web-choice-question-panel">
-                <WebChoiceQuestion card={selectedCard} mediaBaseUrl={mediaBaseUrl} onAttempt={handleAttemptChange} onReset={handleAttemptChange} />
+                <WebChoiceQuestion
+                  card={selectedCard}
+                  mediaBaseUrl={mediaBaseUrl}
+                  storedAttempt={selectedAttempt}
+                  wrongBook={Boolean(selectedAttempt?.wrongBook)}
+                  onAttempt={persistAttempt}
+                  onReset={persistAttempt}
+                  onToggleWrongBook={toggleWrongBook}
+                />
               </main>
             </div>
           ) : (
@@ -285,35 +361,42 @@ export default function WebChoiceBank({
               <aside className="web-choice-drill-side">
                 <div className="web-choice-drill-side-card">
                   <div className="web-choice-kicker">当前范围</div>
-                  <strong>{activeNode?.label || '全部题目'}</strong>
+                  <strong>{wrongOnly ? '错题本' : (activeNode?.label || '全部题目')}</strong>
                   <span>{filteredCards.length.toLocaleString()} 题 · {filters.type || '全部题型'}</span>
                 </div>
                 <div className="web-choice-drill-mini-list">
-                  {filteredCards.slice(Math.max(0, selectedIndex - 5), selectedIndex + 6).map((card) => (
-                    <button
-                      type="button"
-                      key={card.id}
-                      className={card.id === selectedCard?.id ? 'active' : ''}
-                      onClick={() => setSelectedId(card.id)}
-                    >
-                      <b>{card.number}</b>
-                      <span>{card.question}</span>
-                    </button>
-                  ))}
+                  {filteredCards.slice(Math.max(0, selectedIndex - 5), selectedIndex + 6).map((card) => {
+                    const attempt = getAttemptForCard(card, cloudAttempts)
+                    return (
+                      <button
+                        type="button"
+                        key={card.id}
+                        className={card.id === selectedCard?.id ? 'active' : ''}
+                        onClick={() => setSelectedId(card.id)}
+                      >
+                        <b>{card.number}</b>
+                        <span>{card.question}</span>
+                        {attempt?.wrongBook ? <i>错</i> : null}
+                      </button>
+                    )
+                  })}
                 </div>
               </aside>
               <main className="web-choice-drill-stage">
                 <WebChoiceQuestion
                   card={selectedCard}
                   mediaBaseUrl={mediaBaseUrl}
-                  onAttempt={handleAttemptChange}
-                  onReset={handleAttemptChange}
+                  storedAttempt={selectedAttempt}
+                  wrongBook={Boolean(selectedAttempt?.wrongBook)}
+                  onAttempt={persistAttempt}
+                  onReset={persistAttempt}
+                  onToggleWrongBook={toggleWrongBook}
                   onPrev={() => goToOffset(-1)}
                   onNext={() => goToOffset(1)}
+                  currentIndex={selectedIndex}
+                  total={filteredCards.length}
                   showNext
                   compact
-                  currentIndex={Math.max(0, selectedIndex)}
-                  total={filteredCards.length}
                 />
               </main>
             </div>
@@ -324,7 +407,7 @@ export default function WebChoiceBank({
   )
 }
 
-function ChoiceDynamicIsland({ mode, total, index, stats, activeTitle, onBrowse, onDrill, onPrev, onNext }) {
+function ChoiceDynamicIsland({ mode, wrongOnly, total, index, stats, activeTitle, onBrowse, onDrill, onWrongBook, onPrev, onNext }) {
   const progress = total > 0 && index >= 0 ? Math.round(((index + 1) / total) * 100) : 0
   const accuracy = stats.done > 0 ? Math.round((stats.correct / stats.done) * 100) : 0
 
@@ -334,7 +417,7 @@ function ChoiceDynamicIsland({ mode, total, index, stats, activeTitle, onBrowse,
         <div className="web-choice-island-core">
           <span className={`web-choice-island-dot ${mode === 'drill' ? 'active' : ''}`} />
           <div>
-            <strong>{mode === 'drill' ? '刷题模式' : '浏览模式'}</strong>
+            <strong>{wrongOnly ? '错题本' : mode === 'drill' ? '刷题模式' : '浏览模式'}</strong>
             <small>{activeTitle} · {total.toLocaleString()} 题</small>
           </div>
         </div>
@@ -347,12 +430,25 @@ function ChoiceDynamicIsland({ mode, total, index, stats, activeTitle, onBrowse,
         <div className="web-choice-island-stat hide-sm"><b>{stats.done}</b><span>已做</span></div>
         <div className="web-choice-island-stat hide-sm"><b>{accuracy}%</b><span>正确率</span></div>
         <div className="web-choice-island-actions">
-          <button type="button" onClick={onBrowse} className={mode === 'browse' ? 'active' : ''}>浏览</button>
-          <button type="button" onClick={onDrill} className={mode === 'drill' ? 'active' : ''}>刷题</button>
-          <button type="button" onClick={onPrev} disabled={index <= 0}>‹</button>
-          <button type="button" onClick={onNext} disabled={!total || index >= total - 1}>›</button>
+          <button type="button" onClick={onBrowse} className={mode === 'browse' && !wrongOnly ? 'active' : ''}>浏览</button>
+          <button type="button" onClick={onDrill} className={mode === 'drill' && !wrongOnly ? 'active' : ''}>刷题</button>
+          <button type="button" onClick={onWrongBook} className={wrongOnly ? 'active danger' : ''}>错题</button>
+          <button type="button" onClick={onPrev} disabled={!total}>‹</button>
+          <button type="button" onClick={onNext} disabled={!total}>›</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function MemoryStrip({ stats }) {
+  const total = Math.max(1, stats.total)
+  return (
+    <div className="web-choice-memory-strip">
+      <span style={{ '--w': `${Math.round((stats.done / total) * 100)}%` }}>进度 {stats.done}/{stats.total}</span>
+      <span style={{ '--w': `${Math.round((stats.remembered / total) * 100)}%` }}>记住 {stats.remembered}</span>
+      <span style={{ '--w': `${Math.round((stats.weak / total) * 100)}%` }}>薄弱 {stats.weak}</span>
+      <span style={{ '--w': `${Math.round((stats.wrongBook / total) * 100)}%` }}>错题本 {stats.wrongBook}</span>
     </div>
   )
 }
@@ -428,16 +524,42 @@ function OutlineNode({ node, activeKey, collapsedKeys, onToggle, onSelect }) {
   )
 }
 
-function buildDrillStats(cards = []) {
-  let done = 0
-  let correct = 0
+function getAttemptForCard(card, attempts = {}) {
+  if (!card?.id) return null
+  return attempts?.[card.id] || getStoredWebChoiceAttempt(card.id)
+}
+
+function buildDrillStats(cards = [], attempts = {}) {
+  const stats = { total: cards.length, done: 0, correct: 0, wrong: 0, wrongBook: 0, remembered: 0, weak: 0, learning: 0 }
   for (const card of cards) {
-    const attempt = getStoredWebChoiceAttempt(card.id)
-    if (!attempt?.revealed) continue
-    done += 1
-    if (attempt.correct) correct += 1
+    const attempt = getAttemptForCard(card, attempts)
+    if (!attempt) continue
+    if (attempt.wrongBook) stats.wrongBook += 1
+    if (attempt.mastery === 'remembered') stats.remembered += 1
+    if (attempt.mastery === 'weak') stats.weak += 1
+    if (attempt.mastery === 'learning') stats.learning += 1
+    if (!attempt.revealed || attempt.skipped) continue
+    stats.done += 1
+    if (attempt.correct) stats.correct += 1
+    else stats.wrong += 1
   }
-  return { done, correct }
+  return stats
+}
+
+function getAttemptStatus(attempt) {
+  if (!attempt) return ''
+  if (attempt.wrongBook) return 'wrongbook'
+  if (!attempt.revealed) return ''
+  if (attempt.skipped) return 'seen'
+  return attempt.correct ? 'correct' : 'wrong'
+}
+
+function statusLabel(status) {
+  if (status === 'correct') return '已对'
+  if (status === 'wrong') return '错题'
+  if (status === 'wrongbook') return '错题本'
+  if (status === 'seen') return '已看'
+  return ''
 }
 
 function findOutlineNode(root, key) {
