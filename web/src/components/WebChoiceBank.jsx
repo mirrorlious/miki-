@@ -3,6 +3,7 @@ import {
   buildWebChoiceFacets,
   buildWebChoiceOutline,
   filterWebChoiceCards,
+  getStoredWebChoiceAttempt,
   loadWebChoiceCards,
 } from '../lib/webChoiceBank'
 import { WEB_CHOICE_BANK_TITLE } from '../config/webChoiceBankConfig'
@@ -36,6 +37,8 @@ export default function WebChoiceBank({
   const [collapsedKeys, setCollapsedKeys] = useState(() => new Set())
   const [showAllSubjects, setShowAllSubjects] = useState(false)
   const [showAllBooks, setShowAllBooks] = useState(false)
+  const [mode, setMode] = useState('browse')
+  const [attemptVersion, setAttemptVersion] = useState(0)
 
   useEffect(() => {
     if (!allowed) return
@@ -68,10 +71,15 @@ export default function WebChoiceBank({
     () => filteredCards.find((card) => card.id === selectedId) || filteredCards[0],
     [filteredCards, selectedId],
   )
+  const selectedIndex = useMemo(() => {
+    if (!selectedCard) return -1
+    return filteredCards.findIndex((card) => card.id === selectedCard.id)
+  }, [filteredCards, selectedCard])
   const activeNode = useMemo(
     () => findOutlineNode(outline, filters.scopeKey || 'all') || outline,
     [outline, filters.scopeKey],
   )
+  const drillStats = useMemo(() => buildDrillStats(filteredCards), [filteredCards, attemptVersion])
 
   useEffect(() => {
     if (filteredCards.length && !filteredCards.some((card) => card.id === selectedId)) {
@@ -102,16 +110,40 @@ export default function WebChoiceBank({
     })
   }
 
+  function selectCard(cardId) {
+    setSelectedId(cardId)
+    if (mode === 'browse') return
+    const target = document.querySelector('.web-choice-drill-stage')
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function goToOffset(offset) {
+    if (!filteredCards.length) return
+    const current = Math.max(0, selectedIndex)
+    const nextIndex = (current + offset + filteredCards.length) % filteredCards.length
+    setSelectedId(filteredCards[nextIndex].id)
+  }
+
+  function startDrill() {
+    if (!filteredCards.length) return
+    setMode('drill')
+    setSelectedId((current) => filteredCards.some((card) => card.id === current) ? current : filteredCards[0].id)
+  }
+
+  function handleAttemptChange() {
+    setAttemptVersion((value) => value + 1)
+  }
+
   const visibleSubjects = showAllSubjects ? facets.subjects : facets.subjects.slice(0, SUBJECT_LIMIT)
   const visibleBooks = showAllBooks ? facets.books : facets.books.slice(0, BOOK_LIMIT)
 
   return (
-    <div className="web-choice-bank">
+    <div className={`web-choice-bank ${mode === 'drill' ? 'is-drill-mode' : 'is-browse-mode'}`}>
       <header className="web-choice-bank-hero compact">
         <div>
           <div className="web-choice-kicker">内置题库 · 网站版选择题</div>
           <h1>{WEB_CHOICE_BANK_TITLE}</h1>
-          <p>参考“考试分析重新排版”的资料库结构：左侧目录树，中间题目卡片，右侧直接刷题。不再使用 Anki 的 AS 字段模板。</p>
+          <p>浏览模式负责定位题目；刷题模式只保留题目、答案、解析和进度，让手机端也能沉浸做题。</p>
         </div>
         <div className="web-choice-count">
           <strong>{cards.length.toLocaleString()}</strong>
@@ -123,115 +155,201 @@ export default function WebChoiceBank({
       {error ? <div className="web-choice-error">{error}</div> : null}
 
       {!loading && !error ? (
-        <div className="web-choice-layout anki-like">
-          <aside className="web-choice-sidebar tree-mode">
-            <div className="web-choice-sidebar-head">
-              <div>
-                <strong>目录</strong>
-                <span>{cards.length.toLocaleString()} 张卡片</span>
-              </div>
-            </div>
-            <div className="web-choice-tree">
-              <OutlineNode
-                node={outline}
-                activeKey={filters.scopeKey || 'all'}
-                collapsedKeys={collapsedKeys}
-                onToggle={toggleCollapsed}
-                onSelect={(scopeKey) => updateFilter({ scopeKey })}
-              />
-            </div>
-          </aside>
+        <>
+          <ChoiceDynamicIsland
+            mode={mode}
+            total={filteredCards.length}
+            index={selectedIndex}
+            stats={drillStats}
+            activeTitle={activeNode?.label || '全部题目'}
+            onBrowse={() => setMode('browse')}
+            onDrill={startDrill}
+            onPrev={() => goToOffset(-1)}
+            onNext={() => goToOffset(1)}
+          />
 
-          <section className="web-choice-list-panel grid-mode">
-            <div className="web-choice-toolbar sticky-toolbar">
-              <input
-                value={filters.keyword}
-                placeholder="关键词或标签搜索题目"
-                onChange={(e) => updateFilter({ keyword: e.target.value })}
-              />
-              <select value={filters.type} onChange={(e) => updateFilter({ type: e.target.value })}>
-                <option value="">全部题型</option>
-                <option value="单选">单选</option>
-                <option value="多选">多选</option>
-              </select>
-              <button type="button" onClick={resetFilters}>重置</button>
-            </div>
-
-            <FilterChipGroup
-              className="web-choice-chips"
-              allLabel="全部科目"
-              field="subject"
-              items={visibleSubjects}
-              activeValue={filters.subject}
-              onClear={() => updateFilter({ subject: '' })}
-              onToggle={toggleFilter}
-              canExpand={facets.subjects.length > SUBJECT_LIMIT}
-              expanded={showAllSubjects}
-              onExpandToggle={() => setShowAllSubjects((value) => !value)}
-              hiddenCount={Math.max(0, facets.subjects.length - SUBJECT_LIMIT)}
-            />
-
-            <FilterChipGroup
-              className="web-choice-chips muted"
-              allLabel="全部章节"
-              field="book"
-              items={visibleBooks}
-              activeValue={filters.book}
-              onClear={() => updateFilter({ book: '' })}
-              onToggle={toggleFilter}
-              canExpand={facets.books.length > BOOK_LIMIT}
-              expanded={showAllBooks}
-              onExpandToggle={() => setShowAllBooks((value) => !value)}
-              hiddenCount={Math.max(0, facets.books.length - BOOK_LIMIT)}
-            />
-
-            <div className="web-choice-type-chips">
-              {['单选', '多选'].map((type) => (
-                <Chip key={type} active={filters.type === type} onClick={() => toggleFilter('type', type)}>
-                  {type}
-                </Chip>
-              ))}
-            </div>
-
-            <div className="web-choice-section-title">
-              <div>
-                <strong>{activeNode?.label || '全部题目'}</strong>
-                <span>{activeNode?.pathLabel || '全部'} · 当前 {filteredCards.length.toLocaleString()} 题</span>
-              </div>
-            </div>
-
-            <div className="web-choice-card-list card-grid">
-              {filteredCards.slice(0, 600).map((card) => (
-                <button
-                  type="button"
-                  key={card.id}
-                  className={`web-choice-card-row ${selectedCard?.id === card.id ? 'active' : ''}`}
-                  onClick={() => setSelectedId(card.id)}
-                >
-                  <div className="web-choice-card-row-top">
-                    <strong>{card.number}. {card.question}</strong>
-                    <em>{card.type}</em>
+          {mode === 'browse' ? (
+            <div className="web-choice-layout anki-like">
+              <aside className="web-choice-sidebar tree-mode">
+                <div className="web-choice-sidebar-head">
+                  <div>
+                    <strong>目录</strong>
+                    <span>{cards.length.toLocaleString()} 张卡片</span>
                   </div>
-                  <p>{makeChoiceCardPreview(card)}</p>
-                  <span>{card.book} · {card.deckLeaf}</span>
-                </button>
-              ))}
-              {filteredCards.length > 600 ? (
-                <div className="web-choice-list-more">
-                  已显示前 600 题，请用目录、筛选或搜索缩小范围。
                 </div>
-              ) : null}
-              {!filteredCards.length ? (
-                <div className="web-choice-list-more">没有匹配的题目。</div>
-              ) : null}
-            </div>
-          </section>
+                <div className="web-choice-tree">
+                  <OutlineNode
+                    node={outline}
+                    activeKey={filters.scopeKey || 'all'}
+                    collapsedKeys={collapsedKeys}
+                    onToggle={toggleCollapsed}
+                    onSelect={(scopeKey) => updateFilter({ scopeKey })}
+                  />
+                </div>
+              </aside>
 
-          <main className="web-choice-question-panel">
-            <WebChoiceQuestion card={selectedCard} mediaBaseUrl={mediaBaseUrl} />
-          </main>
-        </div>
+              <section className="web-choice-list-panel grid-mode">
+                <div className="web-choice-toolbar sticky-toolbar">
+                  <input
+                    value={filters.keyword}
+                    placeholder="关键词或标签搜索题目"
+                    onChange={(e) => updateFilter({ keyword: e.target.value })}
+                  />
+                  <select value={filters.type} onChange={(e) => updateFilter({ type: e.target.value })}>
+                    <option value="">全部题型</option>
+                    <option value="单选">单选</option>
+                    <option value="多选">多选</option>
+                  </select>
+                  <button type="button" onClick={resetFilters}>重置</button>
+                </div>
+
+                <FilterChipGroup
+                  className="web-choice-chips"
+                  allLabel="全部科目"
+                  field="subject"
+                  items={visibleSubjects}
+                  activeValue={filters.subject}
+                  onClear={() => updateFilter({ subject: '' })}
+                  onToggle={toggleFilter}
+                  canExpand={facets.subjects.length > SUBJECT_LIMIT}
+                  expanded={showAllSubjects}
+                  onExpandToggle={() => setShowAllSubjects((value) => !value)}
+                  hiddenCount={Math.max(0, facets.subjects.length - SUBJECT_LIMIT)}
+                />
+
+                <FilterChipGroup
+                  className="web-choice-chips muted"
+                  allLabel="全部章节"
+                  field="book"
+                  items={visibleBooks}
+                  activeValue={filters.book}
+                  onClear={() => updateFilter({ book: '' })}
+                  onToggle={toggleFilter}
+                  canExpand={facets.books.length > BOOK_LIMIT}
+                  expanded={showAllBooks}
+                  onExpandToggle={() => setShowAllBooks((value) => !value)}
+                  hiddenCount={Math.max(0, facets.books.length - BOOK_LIMIT)}
+                />
+
+                <div className="web-choice-type-chips">
+                  {['单选', '多选'].map((type) => (
+                    <Chip key={type} active={filters.type === type} onClick={() => toggleFilter('type', type)}>
+                      {type}
+                    </Chip>
+                  ))}
+                </div>
+
+                <div className="web-choice-section-title">
+                  <div>
+                    <strong>{activeNode?.label || '全部题目'}</strong>
+                    <span>{activeNode?.pathLabel || '全部'} · 当前 {filteredCards.length.toLocaleString()} 题</span>
+                  </div>
+                  <button type="button" className="web-choice-section-drill" onClick={startDrill} disabled={!filteredCards.length}>
+                    开始刷题
+                  </button>
+                </div>
+
+                <div className="web-choice-card-list card-grid">
+                  {filteredCards.slice(0, 600).map((card) => (
+                    <button
+                      type="button"
+                      key={card.id}
+                      className={`web-choice-card-row ${selectedCard?.id === card.id ? 'active' : ''}`}
+                      onClick={() => selectCard(card.id)}
+                    >
+                      <div className="web-choice-card-row-top">
+                        <strong>{card.number}. {card.question}</strong>
+                        <em>{card.type}</em>
+                      </div>
+                      <p>{makeChoiceCardPreview(card)}</p>
+                      <span>{card.book} · {card.deckLeaf}</span>
+                    </button>
+                  ))}
+                  {filteredCards.length > 600 ? (
+                    <div className="web-choice-list-more">
+                      已显示前 600 题，请用目录、筛选或搜索缩小范围。
+                    </div>
+                  ) : null}
+                  {!filteredCards.length ? (
+                    <div className="web-choice-list-more">没有匹配的题目。</div>
+                  ) : null}
+                </div>
+              </section>
+
+              <main className="web-choice-question-panel">
+                <WebChoiceQuestion card={selectedCard} mediaBaseUrl={mediaBaseUrl} onAttempt={handleAttemptChange} onReset={handleAttemptChange} />
+              </main>
+            </div>
+          ) : (
+            <div className="web-choice-drill-layout">
+              <aside className="web-choice-drill-side">
+                <div className="web-choice-drill-side-card">
+                  <div className="web-choice-kicker">当前范围</div>
+                  <strong>{activeNode?.label || '全部题目'}</strong>
+                  <span>{filteredCards.length.toLocaleString()} 题 · {filters.type || '全部题型'}</span>
+                </div>
+                <div className="web-choice-drill-mini-list">
+                  {filteredCards.slice(Math.max(0, selectedIndex - 5), selectedIndex + 6).map((card) => (
+                    <button
+                      type="button"
+                      key={card.id}
+                      className={card.id === selectedCard?.id ? 'active' : ''}
+                      onClick={() => setSelectedId(card.id)}
+                    >
+                      <b>{card.number}</b>
+                      <span>{card.question}</span>
+                    </button>
+                  ))}
+                </div>
+              </aside>
+              <main className="web-choice-drill-stage">
+                <WebChoiceQuestion
+                  card={selectedCard}
+                  mediaBaseUrl={mediaBaseUrl}
+                  onAttempt={handleAttemptChange}
+                  onReset={handleAttemptChange}
+                  onNext={() => goToOffset(1)}
+                  showNext
+                  compact
+                />
+              </main>
+            </div>
+          )}
+        </>
       ) : null}
+    </div>
+  )
+}
+
+function ChoiceDynamicIsland({ mode, total, index, stats, activeTitle, onBrowse, onDrill, onPrev, onNext }) {
+  const progress = total > 0 && index >= 0 ? Math.round(((index + 1) / total) * 100) : 0
+  const accuracy = stats.done > 0 ? Math.round((stats.correct / stats.done) * 100) : 0
+
+  return (
+    <div className="web-choice-island-wrap">
+      <div className="web-choice-island" role="status" aria-live="polite">
+        <div className="web-choice-island-core">
+          <span className={`web-choice-island-dot ${mode === 'drill' ? 'active' : ''}`} />
+          <div>
+            <strong>{mode === 'drill' ? '刷题模式' : '浏览模式'}</strong>
+            <small>{activeTitle} · {total.toLocaleString()} 题</small>
+          </div>
+        </div>
+        <div className="web-choice-island-stat">
+          <b>{index >= 0 ? index + 1 : 0}</b><span>/ {total}</span>
+        </div>
+        <div className="web-choice-island-progress" aria-hidden="true">
+          <i style={{ width: `${progress}%` }} />
+        </div>
+        <div className="web-choice-island-stat hide-sm"><b>{stats.done}</b><span>已做</span></div>
+        <div className="web-choice-island-stat hide-sm"><b>{accuracy}%</b><span>正确率</span></div>
+        <div className="web-choice-island-actions">
+          <button type="button" onClick={onBrowse} className={mode === 'browse' ? 'active' : ''}>浏览</button>
+          <button type="button" onClick={onDrill} className={mode === 'drill' ? 'active' : ''}>刷题</button>
+          <button type="button" onClick={onPrev} disabled={!total}>‹</button>
+          <button type="button" onClick={onNext} disabled={!total}>›</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -305,6 +423,18 @@ function OutlineNode({ node, activeKey, collapsedKeys, onToggle, onSelect }) {
       ) : null}
     </div>
   )
+}
+
+function buildDrillStats(cards = []) {
+  let done = 0
+  let correct = 0
+  for (const card of cards) {
+    const attempt = getStoredWebChoiceAttempt(card.id)
+    if (!attempt?.revealed) continue
+    done += 1
+    if (attempt.correct) correct += 1
+  }
+  return { done, correct }
 }
 
 function findOutlineNode(root, key) {
