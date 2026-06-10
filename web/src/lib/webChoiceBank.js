@@ -2,6 +2,7 @@ import {
   WEB_CHOICE_BANK_CARDS_URL,
   WEB_CHOICE_BANK_MEDIA_BASE_URL,
 } from '../config/webChoiceBankConfig'
+import { auth, db } from './firebase.js'
 
 let cachedCards = null
 
@@ -194,6 +195,7 @@ export function sanitizeTrustedCardHtml(html = '', mediaBaseUrl = WEB_CHOICE_BAN
 }
 
 export function getStoredWebChoiceAttempt(cardId) {
+  if (!cardId) return null
   try {
     return JSON.parse(localStorage.getItem(`miki:web-choice:${cardId}`) || 'null')
   } catch {
@@ -202,9 +204,99 @@ export function getStoredWebChoiceAttempt(cardId) {
 }
 
 export function saveStoredWebChoiceAttempt(cardId, attempt) {
+  if (!cardId) return
   try {
     localStorage.setItem(`miki:web-choice:${cardId}`, JSON.stringify(attempt))
   } catch {
     // ignore private mode / quota errors
+  }
+}
+
+function cleanFirestoreValue(value) {
+  if (value === undefined) return undefined
+  if (Array.isArray(value)) return value.map(cleanFirestoreValue).filter((item) => item !== undefined)
+  if (value && typeof value === 'object') {
+    return Object.entries(value).reduce((next, [key, item]) => {
+      const clean = cleanFirestoreValue(item)
+      if (clean !== undefined) next[key] = clean
+      return next
+    }, {})
+  }
+  return value
+}
+
+function webChoiceDocId(cardId = '') {
+  return encodeURIComponent(String(cardId || 'unknown')).replace(/\./g, '%2E')
+}
+
+export function mergeWebChoiceAttempt(previous = {}, attempt = {}) {
+  const now = Date.now()
+  const answered = Boolean(attempt.revealed && !attempt.skipped)
+  const correct = answered && attempt.correct === true
+  const wrong = answered && attempt.correct === false
+  const correctCount = Number(previous.correctCount || 0) + (correct ? 1 : 0)
+  const wrongCount = Number(previous.wrongCount || 0) + (wrong ? 1 : 0)
+  const seenCount = Number(previous.seenCount || 0) + (attempt.skipped ? 1 : 0)
+  const attempts = Number(previous.attempts || 0) + (attempt.revealed ? 1 : 0)
+  const mastery = correct
+    ? (correctCount >= 2 ? 'remembered' : 'learning')
+    : wrong
+      ? 'weak'
+      : (previous.mastery || (attempt.skipped ? 'seen' : 'new'))
+
+  return {
+    ...previous,
+    ...attempt,
+    selected: Array.isArray(attempt.selected) ? attempt.selected : [],
+    revealed: Boolean(attempt.revealed),
+    skipped: Boolean(attempt.skipped),
+    correct: Boolean(attempt.correct),
+    attempts,
+    correctCount,
+    wrongCount,
+    seenCount,
+    wrongBook: wrong ? true : Boolean(attempt.wrongBook ?? previous.wrongBook),
+    mastery,
+    updatedAt: now,
+    answeredAt: attempt.answeredAt || previous.answeredAt || new Date(now).toISOString(),
+  }
+}
+
+export async function loadCloudWebChoiceAttempts() {
+  const user = auth?.currentUser
+  if (!db || !user) return {}
+  try {
+    const fns = await import('firebase/firestore')
+    const snap = await fns.getDocs(fns.collection(db, 'users', user.uid, 'webChoiceAttempts'))
+    const attempts = {}
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {}
+      const cardId = data.cardId || decodeURIComponent(docSnap.id)
+      attempts[cardId] = data
+      saveStoredWebChoiceAttempt(cardId, data)
+    })
+    return attempts
+  } catch (error) {
+    console.warn('ZH2000 云端做题记录读取失败，使用本机记录。', error)
+    return {}
+  }
+}
+
+export async function saveCloudWebChoiceAttempt(cardId, attempt) {
+  const user = auth?.currentUser
+  if (!db || !user || !cardId) return false
+  try {
+    const fns = await import('firebase/firestore')
+    const payload = cleanFirestoreValue({
+      ...attempt,
+      cardId: String(cardId),
+      ownerUid: user.uid,
+      updatedAt: Date.now(),
+    })
+    await fns.setDoc(fns.doc(db, 'users', user.uid, 'webChoiceAttempts', webChoiceDocId(cardId)), payload, { merge: true })
+    return true
+  } catch (error) {
+    console.warn('ZH2000 云端做题记录保存失败，已保留本机记录。', error)
+    return false
   }
 }
