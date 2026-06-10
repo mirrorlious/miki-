@@ -192,17 +192,17 @@ export default function WebChoiceQuestion({
           <div className="wm-count">{String(progressNow).padStart(2, '0')} / {String(progressTotal).padStart(2, '0')}</div>
         </header>
 
-        <section className="wm-title-block">
-          <div className="wm-blue-label">NOT JUST OPTIONS</div>
-          <h2>{card.question}</h2>
-        </section>
-
-        <div className="wm-meta-row">
+        <div className="wm-meta-row wm-meta-row-top">
           <span>{card.type}</span>
           {card.volume ? <span>{card.volume}</span> : null}
           {card.book ? <span>{card.book}</span> : null}
           {card.number ? <span>#{card.number}</span> : null}
         </div>
+
+        <section className="wm-title-block">
+          <div className="wm-blue-label">NOT JUST OPTIONS</div>
+          <h2>{card.question}</h2>
+        </section>
 
         <div className="wm-option-grid">
           {(card.options || []).map((option, index) => {
