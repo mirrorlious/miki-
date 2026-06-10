@@ -87,6 +87,8 @@ export default function WebChoiceQuestion({
   const [revealed, setRevealed] = useState(() => normalizeAttempt(previousAttempt).revealed)
   const [skipped, setSkipped] = useState(() => normalizeAttempt(previousAttempt).skipped)
   const [countdown, setCountdown] = useState(readCountdownConfig)
+  const [editingCountdown, setEditingCountdown] = useState(false)
+  const [countdownDraft, setCountdownDraft] = useState(() => readCountdownConfig())
 
   useEffect(() => {
     const attempt = normalizeAttempt(storedAttempt || getStoredWebChoiceAttempt(card?.id))
@@ -157,20 +159,26 @@ export default function WebChoiceQuestion({
     onReset?.(card, attempt)
   }
 
-  function editCountdown() {
-    const title = window.prompt('倒计时标题', countdown.title)
-    if (title === null) return
-    const date = window.prompt('目标日期，格式 YYYY-MM-DD', countdown.date)
-    if (date === null) return
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
-      window.alert('日期格式要写成 YYYY-MM-DD，比如 2026-12-20。')
-      return
+  function openCountdownEditor() {
+    setCountdownDraft(countdown)
+    setEditingCountdown(true)
+  }
+
+  function saveCountdownEditor(event) {
+    event?.preventDefault?.()
+    const next = {
+      title: countdownDraft.title.trim() || DEFAULT_COUNTDOWN.title,
+      date: countdownDraft.date || DEFAULT_COUNTDOWN.date,
+      note: countdownDraft.note.trim() || DEFAULT_COUNTDOWN.note,
     }
-    const note = window.prompt('底部提示文字', countdown.note)
-    if (note === null) return
-    const next = { title: title.trim() || DEFAULT_COUNTDOWN.title, date: date.trim(), note: note.trim() || DEFAULT_COUNTDOWN.note }
     setCountdown(next)
     saveCountdownConfig(next)
+    setEditingCountdown(false)
+  }
+
+  function cancelCountdownEditor() {
+    setCountdownDraft(countdown)
+    setEditingCountdown(false)
   }
 
   return (
@@ -274,8 +282,42 @@ export default function WebChoiceQuestion({
             <p>{countdown.title}</p>
             <small>{countdown.date} · {countdown.note}</small>
           </div>
-          <button type="button" onClick={editCountdown} title="编辑倒计时标题、日期和提示文字">编辑倒计时</button>
+          <button type="button" onClick={openCountdownEditor} title="编辑倒计时标题、日期和提示文字">编辑倒计时</button>
           <b>{countdownDays === null ? '--' : Math.max(0, countdownDays)}</b>
+          {editingCountdown ? (
+            <form className="wm-countdown-editor" onSubmit={saveCountdownEditor}>
+              <label>
+                <span>标题</span>
+                <input
+                  type="text"
+                  value={countdownDraft.title}
+                  onChange={(event) => setCountdownDraft((prev) => ({ ...prev, title: event.target.value }))}
+                  placeholder="例如：距离考研初试"
+                />
+              </label>
+              <label>
+                <span>日期</span>
+                <input
+                  type="date"
+                  value={countdownDraft.date}
+                  onChange={(event) => setCountdownDraft((prev) => ({ ...prev, date: event.target.value }))}
+                />
+              </label>
+              <label>
+                <span>内容</span>
+                <input
+                  type="text"
+                  value={countdownDraft.note}
+                  onChange={(event) => setCountdownDraft((prev) => ({ ...prev, note: event.target.value }))}
+                  placeholder="写一句提醒自己的话"
+                />
+              </label>
+              <div>
+                <button type="submit">保存</button>
+                <button type="button" onClick={cancelCountdownEditor}>取消</button>
+              </div>
+            </form>
+          ) : null}
         </footer>
       </div>
 
