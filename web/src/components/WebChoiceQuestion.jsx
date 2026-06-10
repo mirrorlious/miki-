@@ -13,7 +13,7 @@ const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 const COUNTDOWN_STORAGE_KEY = 'miki.zh2000.countdown'
 const DEFAULT_COUNTDOWN = {
   title: '距离考研初试',
-  date: '2026-12-26',
+  date: '2026-12-20',
   note: '把每天的选择题都变成确定感。',
 }
 
@@ -59,6 +59,14 @@ function getCountdownDays(dateText) {
   return Math.ceil((targetDay.getTime() - today.getTime()) / 86400000)
 }
 
+function normalizeAttempt(attempt = null) {
+  return {
+    selected: Array.isArray(attempt?.selected) ? attempt.selected : [],
+    revealed: Boolean(attempt?.revealed),
+    skipped: Boolean(attempt?.skipped),
+  }
+}
+
 export default function WebChoiceQuestion({
   card,
   mediaBaseUrl = WEB_CHOICE_BANK_MEDIA_BASE_URL,
@@ -75,17 +83,17 @@ export default function WebChoiceQuestion({
   total = 0,
 }) {
   const previousAttempt = useMemo(() => storedAttempt || getStoredWebChoiceAttempt(card?.id), [card?.id, storedAttempt])
-  const [selected, setSelected] = useState(previousAttempt?.selected || [])
-  const [revealed, setRevealed] = useState(Boolean(previousAttempt?.revealed))
-  const [skipped, setSkipped] = useState(Boolean(previousAttempt?.skipped))
+  const [selected, setSelected] = useState(() => normalizeAttempt(previousAttempt).selected)
+  const [revealed, setRevealed] = useState(() => normalizeAttempt(previousAttempt).revealed)
+  const [skipped, setSkipped] = useState(() => normalizeAttempt(previousAttempt).skipped)
   const [countdown, setCountdown] = useState(readCountdownConfig)
 
   useEffect(() => {
-    const attempt = storedAttempt || getStoredWebChoiceAttempt(card?.id)
-    setSelected(attempt?.selected || [])
-    setRevealed(Boolean(attempt?.revealed))
-    setSkipped(Boolean(attempt?.skipped))
-  }, [card?.id, storedAttempt])
+    const attempt = normalizeAttempt(storedAttempt || getStoredWebChoiceAttempt(card?.id))
+    setSelected(attempt.selected)
+    setRevealed(attempt.revealed)
+    setSkipped(attempt.skipped)
+  }, [card?.id])
 
   if (!card) {
     return (
@@ -131,6 +139,7 @@ export default function WebChoiceQuestion({
       revealed: true,
       skipped: Boolean(direct && !selected.length),
       correct: direct && !selected.length ? false : currentCorrect,
+      wrongBook,
       answeredAt: new Date().toISOString(),
     }
     saveStoredWebChoiceAttempt(card.id, attempt)
@@ -140,7 +149,7 @@ export default function WebChoiceQuestion({
   }
 
   function reset() {
-    const attempt = { selected: [], revealed: false, skipped: false, correct: false }
+    const attempt = { selected: [], revealed: false, skipped: false, correct: false, wrongBook }
     setSelected([])
     setRevealed(false)
     setSkipped(false)
@@ -154,7 +163,7 @@ export default function WebChoiceQuestion({
     const date = window.prompt('目标日期，格式 YYYY-MM-DD', countdown.date)
     if (date === null) return
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
-      window.alert('日期格式要写成 YYYY-MM-DD，比如 2026-12-26。')
+      window.alert('日期格式要写成 YYYY-MM-DD，比如 2026-12-20。')
       return
     }
     const note = window.prompt('底部提示文字', countdown.note)
