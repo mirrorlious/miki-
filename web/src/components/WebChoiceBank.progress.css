@@ -1,0 +1,151 @@
+.web-choice-count.practice-count small {
+  display: block;
+  margin-top: 7px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.web-choice-memory-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.web-choice-memory-strip span {
+  position: relative;
+  overflow: hidden;
+  min-height: 38px;
+  border-radius: 18px;
+  background: #fff;
+  color: #475569;
+  padding: 12px 14px;
+  font-size: 12px;
+  font-weight: 950;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.web-choice-memory-strip span::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--w, 0%);
+  background: linear-gradient(90deg, rgba(52, 199, 89, 0.14), rgba(0, 122, 255, 0.08));
+}
+
+.web-choice-memory-strip span {
+  isolation: isolate;
+}
+
+.web-choice-progress-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.web-choice-progress-pills b {
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.web-choice-card-row.status-correct {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: #f4fff8;
+}
+
+.web-choice-card-row.status-wrong,
+.web-choice-card-row.status-wrongbook {
+  border-color: rgba(239, 68, 68, 0.34);
+  background: #fff7f7;
+}
+
+.web-choice-card-row.status-seen {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: #f8fafc;
+}
+
+.web-choice-card-row.status-correct em {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.web-choice-card-row.status-wrong em,
+.web-choice-card-row.status-wrongbook em {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.web-choice-card-row.status-seen em {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.web-choice-wrong-toggle {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 18px;
+  background: #fff1f2;
+  color: #be123c;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.web-choice-wrong-toggle.active {
+  background: #be123c;
+  color: #fff;
+}
+
+.web-choice-island-actions button.danger {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.web-choice-drill-mini-list i {
+  justify-self: end;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+@media (max-width: 900px) {
+  .web-choice-memory-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .web-choice-memory-strip {
+    margin-bottom: 10px;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .web-choice-memory-strip span {
+    min-height: 34px;
+    border-radius: 15px;
+    padding: 10px 11px;
+    font-size: 11px;
+  }
+
+  .web-choice-progress-pills {
+    justify-content: flex-start;
+  }
+
+  .web-choice-actions.practice-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .web-choice-wrong-toggle {
+    grid-column: 1 / -1;
+  }
+}
