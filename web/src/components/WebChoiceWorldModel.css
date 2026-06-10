@@ -66,19 +66,20 @@
 .wm-meta-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin: 2px 0 26px;
+  justify-content: center;
+  gap: 12px;
+  margin: 6px 0 30px;
 }
 
 .wm-meta-row span {
-  border: 1px solid rgba(7, 62, 168, 0.32);
-  background: #f2f6ff;
-  padding: 10px 16px;
+  border: 2px solid #073ea8;
+  background: #ffffff;
+  padding: 11px 21px;
   color: #073ea8;
-  font-size: 15px;
-  font-weight: 950;
-  letter-spacing: 0.02em;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+  font-size: 16px;
+  font-weight: 1000;
+  letter-spacing: 0.01em;
+  box-shadow: 0 0 0 1px rgba(7, 62, 168, 0.08), 0 10px 22px rgba(7, 62, 168, 0.05);
 }
 
 .wm-option-grid {
@@ -218,11 +219,11 @@
 }
 
 .wm-countdown > button {
-  border: 1px solid rgba(7, 62, 168, 0.32);
-  background: #f2f6ff;
+  border: 2px solid #073ea8;
+  background: #fff;
   color: #073ea8;
-  min-height: 40px;
-  padding: 0 14px;
+  min-height: 42px;
+  padding: 0 16px;
   font: inherit;
   font-size: 13px;
   font-weight: 950;
