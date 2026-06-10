@@ -94,12 +94,13 @@ export default function WebChoiceQuestion({
   }
 
   const analysisHtml = sanitizeTrustedCardHtml(card.analysis || '', mediaBaseUrl)
-  const canGoPrev = currentIndex > 0
-  const canGoNext = currentIndex < total - 1
+  const hasTotal = total > 0
+  const canGoPrev = hasTotal ? currentIndex > 0 : Boolean(onPrev)
+  const canGoNext = hasTotal ? currentIndex < total - 1 : Boolean(onNext)
 
   return (
     <article className={`web-choice-question ${compact ? 'compact' : ''}`}>
-      {total > 0 ? (
+      {hasTotal ? (
         <div className="web-choice-practice-bar">
           <button type="button" className="web-choice-nav-btn" onClick={onPrev} disabled={!canGoPrev}>上一题</button>
           <div className="web-choice-practice-progress">
