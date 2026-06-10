@@ -10,6 +10,12 @@ import './WebChoiceBank.drill.css'
 import './WebChoiceWorldModel.css'
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+const COUNTDOWN_STORAGE_KEY = 'miki.zh2000.countdown'
+const DEFAULT_COUNTDOWN = {
+  title: '距离考研初试',
+  date: '2026-12-26',
+  note: '把每天的选择题都变成确定感。',
+}
 
 function isCorrectSelection(selected = [], answers = []) {
   const answerSet = new Set(answers || [])
@@ -21,20 +27,36 @@ function getOptionLabel(index) {
   return labels[index] || `CHOICE ${index + 1}`
 }
 
-function stripHtmlToText(value = '') {
-  return String(value || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+function readCountdownConfig() {
+  try {
+    const raw = window.localStorage?.getItem(COUNTDOWN_STORAGE_KEY)
+    if (!raw) return DEFAULT_COUNTDOWN
+    const parsed = JSON.parse(raw)
+    return {
+      title: String(parsed?.title || DEFAULT_COUNTDOWN.title),
+      date: String(parsed?.date || DEFAULT_COUNTDOWN.date),
+      note: String(parsed?.note || DEFAULT_COUNTDOWN.note),
+    }
+  } catch {
+    return DEFAULT_COUNTDOWN
+  }
 }
 
-function makeTakeaway(card, revealed, answers, currentCorrect, skipped) {
-  if (!revealed) return '先选，再看解析。把题目当作一个小场景来理解。'
-  const analysisText = stripHtmlToText(card?.analysis || '')
-  if (analysisText) return analysisText.slice(0, 78) + (analysisText.length > 78 ? '…' : '')
-  if (skipped) return `本题正确答案：${answers.join('、') || '暂无'}。`
-  return currentCorrect ? '这题已经打通，继续保持节奏。' : `关键变化：正确答案是 ${answers.join('、') || '暂无'}，回看选项差异。`
+function saveCountdownConfig(config) {
+  try {
+    window.localStorage?.setItem(COUNTDOWN_STORAGE_KEY, JSON.stringify(config))
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function getCountdownDays(dateText) {
+  const target = new Date(`${dateText || DEFAULT_COUNTDOWN.date}T00:00:00+08:00`)
+  if (Number.isNaN(target.getTime())) return null
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const targetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+  return Math.ceil((targetDay.getTime() - today.getTime()) / 86400000)
 }
 
 export default function WebChoiceQuestion({
@@ -56,6 +78,7 @@ export default function WebChoiceQuestion({
   const [selected, setSelected] = useState(previousAttempt?.selected || [])
   const [revealed, setRevealed] = useState(Boolean(previousAttempt?.revealed))
   const [skipped, setSkipped] = useState(Boolean(previousAttempt?.skipped))
+  const [countdown, setCountdown] = useState(readCountdownConfig)
 
   useEffect(() => {
     const attempt = storedAttempt || getStoredWebChoiceAttempt(card?.id)
@@ -86,7 +109,7 @@ export default function WebChoiceQuestion({
   const canGoNext = hasTotal ? currentIndex < total - 1 : Boolean(onNext)
   const progressNow = hasTotal ? currentIndex + 1 : Number(card.number || 0) || 1
   const progressTotal = hasTotal ? total : 5
-  const takeaway = makeTakeaway(card, revealed, answers, currentCorrect, skipped)
+  const countdownDays = getCountdownDays(countdown.date)
 
   function toggleOption(letter) {
     if (revealed) return
@@ -123,6 +146,22 @@ export default function WebChoiceQuestion({
     setSkipped(false)
     saveStoredWebChoiceAttempt(card.id, attempt)
     onReset?.(card, attempt)
+  }
+
+  function editCountdown() {
+    const title = window.prompt('倒计时标题', countdown.title)
+    if (title === null) return
+    const date = window.prompt('目标日期，格式 YYYY-MM-DD', countdown.date)
+    if (date === null) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+      window.alert('日期格式要写成 YYYY-MM-DD，比如 2026-12-26。')
+      return
+    }
+    const note = window.prompt('底部提示文字', countdown.note)
+    if (note === null) return
+    const next = { title: title.trim() || DEFAULT_COUNTDOWN.title, date: date.trim(), note: note.trim() || DEFAULT_COUNTDOWN.note }
+    setCountdown(next)
+    saveCountdownConfig(next)
   }
 
   return (
@@ -194,7 +233,7 @@ export default function WebChoiceQuestion({
                 disabled={!hasSelection}
                 title={hasSelection ? '提交并判定正误' : '先选择一个选项'}
               >
-                提交答案
+                提交
               </button>
               <button type="button" className="wm-secondary" onClick={() => finishAttempt({ direct: true })}>
                 直接看答案
@@ -220,12 +259,14 @@ export default function WebChoiceQuestion({
           </button>
         </div>
 
-        <footer className="wm-takeaway">
+        <footer className="wm-countdown">
           <div>
-            <span>TAKEAWAY</span>
-            <p>{takeaway}</p>
+            <span>COUNTDOWN</span>
+            <p>{countdown.title}</p>
+            <small>{countdown.date} · {countdown.note}</small>
           </div>
-          <b>{selected.length ? selected.join('') : '?'}</b>
+          <button type="button" onClick={editCountdown} title="编辑倒计时标题、日期和提示文字">编辑倒计时</button>
+          <b>{countdownDays === null ? '--' : Math.max(0, countdownDays)}</b>
         </footer>
       </div>
 
