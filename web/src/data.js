@@ -1,5 +1,6 @@
 export const STORAGE_KEY='yang-memorizer-mvp'
 const MAX_REVIEW_INTERVAL_DAYS=365
+const REVIEW_INTERVAL_STEPS=[1,3,5,8,12,18,25,35]
 export const dateKey=(value=new Date())=>{
   const date=new Date(value)
   const year=date.getFullYear()
@@ -44,15 +45,19 @@ export function loadData(){
 
 const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x.toISOString().slice(0,10)}
 const addMinutes=(d,n)=>{const x=new Date(d);x.setMinutes(x.getMinutes()+n);return x}
+const getReviewStepInterval=(reps,offset=0)=>{
+  const index=Math.max(0,Math.min(REVIEW_INTERVAL_STEPS.length-1,(reps||1)-1+offset))
+  return REVIEW_INTERVAL_STEPS[index]
+}
 
 export function scheduleReview(review,grade){
   const r=review??{dueDate:todayKey(),interval:0,ease:2.5,reps:0,lapses:0,lastGrade:null}
   let ease=r.ease??2.5,reps=r.reps??0,lapses=r.lapses??0,interval=r.interval??0
   let dueAt
   if(grade===0){ease=Math.max(1.3,ease-0.2);reps=0;lapses+=1;interval=0;dueAt=addMinutes(new Date(),10)}
-  else if(grade===1){ease=Math.max(1.3,ease-0.15);reps+=1;interval=Math.max(1,Math.round((interval||1)*1.2));dueAt=interval<=1?addMinutes(new Date(),60):new Date(`${addDays(todayKey(),interval)}T09:00:00`)}
-  else if(grade===2){ease=Math.max(1.3,ease+0.05);reps+=1;interval=reps<=1?1:reps===2?3:Math.round(Math.max(4,interval*ease))}
-  else{ease=Math.max(1.3,ease+0.15);reps+=1;interval=reps<=1?2:reps===2?5:Math.round(Math.max(6,interval*(ease+0.15)))}
+  else if(grade===1){ease=Math.max(1.3,ease-0.15);reps+=1;interval=1}
+  else if(grade===2){ease=Math.max(1.3,ease+0.03);reps+=1;interval=getReviewStepInterval(reps)}
+  else{ease=Math.max(1.3,ease+0.08);reps+=1;interval=getReviewStepInterval(reps,1)}
   interval=Math.min(interval,MAX_REVIEW_INTERVAL_DAYS)
   if(!dueAt) dueAt=new Date(`${addDays(todayKey(),interval)}T09:00:00`)
   return {dueDate:dateKey(dueAt),dueAt:dueAt.toISOString(),interval,ease:Number(ease.toFixed(2)),reps,lapses,lastGrade:grade}
